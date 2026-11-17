@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import * as CANNON from 'cannon-es';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { buildScenery, softTexture, R, LAUNCH, TREE } from './scenery.js';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { sfx } from './audio.js';
 
 // ---------- renderer / scene ----------
@@ -17,6 +19,17 @@ const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(50, 1, 0.5, 700);
 const scenery = buildScenery(scene);
 const camBase = new THREE.Vector3(), camLook = new THREE.Vector3(0, 2.4, 1.5), lookNow = camLook.clone();
+
+// ---------- the thrower: a generated 3D character standing on the launch islet ----------
+const hero = new THREE.Group();
+hero.position.set(LAUNCH.x - 0.95, LAUNCH.y - 0.47, LAUNCH.z + 0.1);
+scene.add(hero);
+let heroKick = 0, heroLoaded = false;
+new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).load(import.meta.env.BASE_URL + 'models/general.glb', g => {
+  g.scene.scale.setScalar(2.5); g.scene.rotation.y = Math.PI;      // model faces +z; turn it toward the island
+  g.scene.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+  hero.add(g.scene); heroLoaded = true;
+}, undefined, e => console.error('character model failed to load', e));
 
 function resize() {
   const w = window.innerWidth, h = window.innerHeight;
@@ -61,7 +74,7 @@ const MAT = {
   wood: new THREE.MeshStandardMaterial({ map: grainTexture('#d9a566', '#7a4a22'), roughness: 0.75 }),
   dark: new THREE.MeshStandardMaterial({ map: grainTexture('#a8683a', '#4d2a12'), roughness: 0.8 }),
   stone: new THREE.MeshStandardMaterial({ map: grainTexture('#cfc6ba', '#8a8076'), roughness: 0.95 }),
-  ball: new THREE.MeshPhysicalMaterial({ color: 0xd8402a, roughness: 0.35, clearcoat: 0.8, clearcoatRoughness: 0.25 }),
+  ball: new THREE.MeshStandardMaterial({ color: 0xff7a2a, emissive: 0xff3a08, emissiveIntensity: 0.9, roughness: 0.5 }),
   paper: new THREE.MeshStandardMaterial({ color: 0xffe2a0, emissive: 0xffa53a, emissiveIntensity: 1.6, roughness: 0.6 }),
   cap: new THREE.MeshStandardMaterial({ color: 0x5a3320, roughness: 0.7 }),
 };
@@ -240,6 +253,8 @@ function buildLevel() {
 }
 function spawnReady() {
   readyBall = new THREE.Mesh(sphereGeo, MAT.ball); readyBall.scale.setScalar(0.01); readyBall.castShadow = true;
+  const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: 0xff8a3a, blending: THREE.AdditiveBlending, depthWrite: false, opacity: 0.4 }));
+  halo.scale.setScalar(3.4); readyBall.add(halo);
   readyBall.position.copy(LAUNCH); scene.add(readyBall);
 }
 
@@ -299,7 +314,7 @@ function fling(yaw, power) {
     if (e.body.type !== CANNON.Body.STATIC && !o.hit) { o.hit = true; wakeAllFlag = true; }
     onHit(e);
   });
-  readyBall = null; shotsLeft--; sinceFling = 0; combo = 0; reloadT = 0.7;
+  readyBall = null; shotsLeft--; sinceFling = 0; combo = 0; reloadT = 0.7; heroKick = 1;
   sfx.whoosh(power); hud();
   if (!localStorage.getItem('lanternfall.played')) { localStorage.setItem('lanternfall.played', '1'); elHint.classList.add('off'); }
   return true;
@@ -387,6 +402,20 @@ function step(dtReal) {
     readyBall.position.set(LAUNCH.x - Math.sin(aim.yaw) * pull * 0.7, LAUNCH.y + pull * 0.1 + Math.sin(time * 2.4) * 0.03, LAUNCH.z + Math.cos(aim.yaw) * pull * 0.7);
   }
   showDots();
+  {                                                        // the thrower leans back while aiming and lunges on release
+    const pull = aim.on && aim.valid ? aim.power : 0;
+    heroKick = Math.max(0, heroKick - dtReal * 2.5);
+    const lean = pull * 0.2 - Math.sin(heroKick * Math.PI) * 0.4;
+    hero.rotation.x += (lean - hero.rotation.x) * Math.min(1, dtReal * 14);
+    hero.rotation.y += ((aim.on ? -aim.yaw * 0.8 : 0) + 0.3 - hero.rotation.y) * Math.min(1, dtReal * 8);
+    hero.position.y = LAUNCH.y - 0.47 + Math.sin(time * 1.8) * 0.012;
+  }
+  for (const o of objs) {                                  // fire trail behind flying balls
+    if (o.kind !== 'ball' || o.body.velocity.lengthSquared() < 9 || Math.random() > dt * 70) continue;
+    const p = o.body.position;
+    spawn(p.x + rnd(0.15), p.y + rnd(0.15), p.z + rnd(0.15), rnd(0.5), 0.8 + Math.random(), rnd(0.5), 0.35 + Math.random() * 0.3, 0.9,
+      { color: Math.random() < 0.5 ? 0xff6a1a : 0xffb040, grow: -0.6, alpha: 0.8 });
+  }
   for (const l of lanterns) l.glow.material.opacity = 0.62 + Math.sin(time * 2.2 + l.phase) * 0.14;
   updateParts(dt, time);
   scenery.update(time);
@@ -416,7 +445,7 @@ window.game = {
   setLevel(n) { level = n; buildLevel(); },
   auto() { window.__manual = false; },
   state() {
-    return { level, state, shotsLeft, shotsMax, lanterns: lanterns.length, objects: objs.length, ready: !!readyBall,
+    return { heroLoaded, level, state, shotsLeft, shotsMax, lanterns: lanterns.length, objects: objs.length, ready: !!readyBall,
       maxY: +Math.max(0, ...objs.map(o => o.body.position.y)).toFixed(2),
       moving: objs.filter(o => o.body.sleepState !== CANNON.Body.SLEEPING).length };
   },
