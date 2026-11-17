@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "lanternfall",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "F:/GitHub/lanternfall", "run", "dev"],
+      "port": 5190
+    }
+  ]
+}
