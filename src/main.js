@@ -277,7 +277,7 @@ function gate(cx, cz, yaw) {
 }
 
 const forcedSeason = new URLSearchParams(location.search).get('season');
-const seasonFor = l => forcedSeason || (l % 2 === 0 ? 'winter' : 'summer');   // the seasons take turns, level by level
+const seasonFor = () => forcedSeason || 'summer';   // summer only for now; winter is parked behind ?season=winter
 let level = Math.max(1, parseInt(localStorage.getItem('lanternfall.level') || '1', 10) || 1);
 let state = 'play', stateT = 0, combo = 0, comboT = 0, total = 0, cooldown = 0, camReady = false;
 const sites = [];
