@@ -24,29 +24,33 @@ const camBase = new THREE.Vector3(), camLook = new THREE.Vector3(0, 2.4, 1.5), l
 const hero = new THREE.Group();
 hero.position.set(LAUNCH.x - 0.95, LAUNCH.y - 0.47, LAUNCH.z + 0.1);
 scene.add(hero);
-let heroKick = 0, heroWind = 0, heroLoaded = false;
-const bones = {}, rest = {}, restW = {};
-const _q = new THREE.Quaternion(), _d = new THREE.Quaternion(), _e = new THREE.Euler();
-// Rotate a bone away from its rest pose by angles given in the character's own frame
-// (x = his right, y = up, he faces -z), so poses don't depend on each bone's local axes.
-function pose(name, rx, ry, rz) {
-  const b = bones[name]; if (!b) return;
-  _d.setFromEuler(_e.set(rx, ry, rz, 'YXZ'));
-  _q.copy(restW[name]).invert().multiply(_d).multiply(restW[name]);
-  b.quaternion.copy(rest[name]).multiply(_q);
-}
-new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).load(import.meta.env.BASE_URL + 'models/general-rigged.glb', g => {
+let heroKick = 0, heroLoaded = false, heroMode = '', heroAct = null, mixer = null;
+const acts = {};
+const THROW = { clip: 'box_02', wind: 2.0, speed: 1.3, hold: 0.8 };   // which clip is the throw, and where its wind-up sits
+new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).load(import.meta.env.BASE_URL + 'models/general-animated.glb', g => {
   g.scene.scale.setScalar(2.5); g.scene.rotation.y = Math.PI;      // model faces +z; turn it toward the island
-  g.scene.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
-  g.scene.traverse(o => {
-    if (o.isSkinnedMesh) o.frustumCulled = false;
-    if (o.isBone) { const k = o.name.replace(/^mixamorig:?/, ''); bones[k] = o; rest[k] = o.quaternion.clone(); }
-  });
-  hero.add(g.scene); hero.updateMatrixWorld(true);
-  const inv = hero.getWorldQuaternion(new THREE.Quaternion()).invert();
-  for (const k in bones) restW[k] = inv.clone().multiply(bones[k].getWorldQuaternion(new THREE.Quaternion()));
-  heroLoaded = true;
+  g.scene.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } if (o.isSkinnedMesh) o.frustumCulled = false; });
+  mixer = new THREE.AnimationMixer(g.scene);
+  for (const c of g.animations) {
+    for (const t of c.tracks) {                                    // keep him on his islet: no sideways travel from the clips
+      if (!/Hips\.position$/.test(t.name)) continue;
+      for (let i = 0; i < t.values.length; i += 3) { t.values[i] = t.values[0]; t.values[i + 2] = t.values[2]; }
+    }
+    acts[c.name] = mixer.clipAction(c);
+  }
+  hero.add(g.scene); heroLoaded = true;
 }, undefined, e => console.error('character model failed to load', e));
+function heroPlay(name, { fade = 0.25, once = false, speed = 1, at = null } = {}) {
+  const a = acts[name]; if (!a) return;
+  if (a !== heroAct) {
+    a.reset(); a.enabled = true; a.fadeIn(fade).play();
+    if (heroAct) heroAct.fadeOut(fade);
+    heroAct = a;
+  }
+  if (at !== null) a.time = at;
+  a.paused = false; a.timeScale = speed; a.clampWhenFinished = true;
+  a.setLoop(once ? THREE.LoopOnce : THREE.LoopRepeat, Infinity);
+}
 
 function resize() {
   const w = window.innerWidth, h = window.innerHeight;
@@ -419,21 +423,19 @@ function step(dtReal) {
     readyBall.position.set(LAUNCH.x - Math.sin(aim.yaw) * pull * 0.7, LAUNCH.y + pull * 0.1 + Math.sin(time * 2.4) * 0.03, LAUNCH.z + Math.cos(aim.yaw) * pull * 0.7);
   }
   showDots();
-  if (heroLoaded) {                                        // the thrower: idle, wind up while aiming, throw on release
-    const pull = aim.on && aim.valid && readyBall ? aim.power : 0;
-    heroKick = Math.max(0, heroKick - dtReal * 2.2);
-    heroWind += (pull - heroWind) * Math.min(1, dtReal * (pull > heroWind ? 10 : 22));
-    const dbg = window.__pose, w = dbg ? dbg.w : heroWind, th = dbg ? dbg.th : Math.sin(Math.min(1, heroKick * 1.15) * Math.PI);
-    const br = Math.sin(time * 1.8), yaw = aim.on ? aim.yaw : 0;
-    hero.rotation.y += (-yaw * 0.8 + 0.25 - hero.rotation.y) * Math.min(1, dtReal * 8);
-    hero.rotation.x = 0;
-    pose('Spine', 0.02 * br + 0.14 * w - 0.25 * th, -0.22 * w + 0.3 * th, 0);
-    pose('Spine1', 0.08 * w - 0.15 * th, -0.2 * w + 0.28 * th, 0);
-    pose('Spine2', 0, -0.15 * w + 0.2 * th, 0);
-    pose('RightArm', 0.04 * br + 1.5 * w - 1.0 * th, 0, 0);
-    pose('RightForeArm', 0.5 * w - 0.3 * th, 0, 0);
-    pose('LeftArm', 0.04 * br - 0.35 * w + 0.4 * th, 0, 0);
-    pose('Head', -0.12 * w + 0.1 * th, Math.sin(time * 0.6) * 0.14 * (1 - w) - yaw * 0.4, 0);
+  if (heroLoaded) {                                        // the thrower: idle, hold the wind-up while aiming, throw on release
+    const aiming = aim.on && aim.valid && !!readyBall, yaw = aim.on ? aim.yaw : 0;
+    heroKick = Math.max(0, heroKick - dtReal / THROW.hold);
+    const mode = state === 'won' ? 'win' : heroKick > 0 ? 'throw' : aiming ? 'aim' : 'idle';
+    if (mode !== heroMode) {
+      if (mode === 'win') heroPlay('dance_01', { fade: 0.4 });
+      else if (mode === 'aim') heroPlay(THROW.clip, { fade: 0.18, speed: 0, at: THROW.wind });
+      else if (mode === 'throw') heroPlay(THROW.clip, { fade: 0.08, speed: THROW.speed, once: true, at: heroMode === 'aim' ? null : THROW.wind });
+      else heroPlay('look_around', { fade: 0.35 });
+      heroMode = mode;
+    }
+    mixer.update(dtReal);
+    hero.rotation.y += (-yaw * 0.8 - hero.rotation.y) * Math.min(1, dtReal * 8);
   }
   for (const o of objs) {                                  // fire trail behind flying balls
     if (o.kind !== 'ball' || o.body.velocity.lengthSquared() < 9 || Math.random() > dt * 70) continue;
@@ -466,7 +468,7 @@ function frame(now) {
 // Scripted stepping for tests (the preview pane only runs frames while visible).
 window.game = {
   step(seconds = 1, dt = 1 / 60) { window.__manual = true; for (let t = 0; t < seconds; t += dt) step(dt); renderer.render(scene, camera); return this.state(); },
-  fling, debug: { camera, hero, bones, rest, THREE },
+  fling, debug: { camera, hero, acts, THROW, THREE, get mixer() { return mixer; } },
   setLevel(n) { level = n; buildLevel(); },
   auto() { window.__manual = false; },
   state() {
