@@ -32,8 +32,8 @@ export const TREES = (() => {
   const r = rng(77), out = [];
   for (let tries = 0; out.length < 18 && tries < 400; tries++) {
     const a = r() * Math.PI * 2, rad = 6 + Math.sqrt(r()) * (R - 9), x = Math.cos(a) * rad, z = Math.sin(a) * rad;
-    if (Math.hypot(x - START.x, z - START.z) < 7) continue;
-    if (out.some(t => Math.hypot(t.x - x, t.z - z) < 7)) continue;
+    if (Math.hypot(x - START.x, z - START.z) < 12) continue;
+    if (out.some(t => Math.hypot(t.x - x, t.z - z) < 8)) continue;
     out.push({ x, z, s: 1 + r() * 0.7 });
   }
   return out;
@@ -94,21 +94,43 @@ function cloudSea(r) {
   return { group: g, mat, floorMat };
 }
 
-// Heaped white summer clouds standing in the sky around the island.
-function cumulus(r) {
-  const mat = new THREE.MeshLambertMaterial({ color: 0xffffff, emissive: 0xc2d2ea, emissiveIntensity: 0.62, fog: false });
-  const N = 150, m = new THREE.InstancedMesh(new THREE.SphereGeometry(1, 18, 14), mat, N), d = new THREE.Object3D();
-  let k = 0;
-  for (let c = 0; c < 15 && k < N; c++) {
-    const a = c / 15 * Math.PI * 2 + r() * 0.3, rad = 230 + r() * 190, cx = Math.cos(a) * rad, cz = Math.sin(a) * rad, cy = 30 + r() * 80, w = 22 + r() * 26;
-    for (let i = 0; i < 10 && k < N; i++, k++) {
-      const t = (i / 9 - 0.5) * 2, s = w * (0.45 + r() * 0.5) * (1 - Math.abs(t) * 0.45);
-      d.position.set(cx - Math.sin(a) * t * w * 1.4 + (r() - 0.5) * w * 0.5, cy + s * 0.55 + (i % 3 === 0 ? s * 0.5 : 0), cz + Math.cos(a) * t * w * 1.4 + (r() - 0.5) * w * 0.5);
-      d.scale.set(s, s * 0.72, s); d.updateMatrix(); m.setMatrixAt(k, d.matrix);
-    }
+// Summer clouds are painted, not modelled: each is a heap of soft puffs drawn on a canvas, blue-grey in the
+// body and white where the sun catches the tops, with a flat base. The paintings sit on camera-facing cards.
+function cloudTexture(r) {
+  const W = 512, H = 288, c = document.createElement('canvas'); c.width = W; c.height = H;
+  const g = c.getContext('2d'), puffs = [], n = 20 + Math.floor(r() * 10);
+  for (let i = 0; i < n; i++) {
+    const t = r(), hill = Math.sin(t * Math.PI), rad = 26 + r() * 30 + hill * 26;
+    puffs.push([W * (0.13 + 0.74 * t), H * 0.80 - rad * 0.5 - hill * r() * H * 0.36, rad]);
   }
-  m.count = k; m.frustumCulled = false;
-  return m;
+  for (let i = 0; i < 7; i++) puffs.push([W * (0.2 + 0.6 * r()), H * 0.74, 44 + r() * 26]);       // fill the base
+  const pass = (dx, dy, k, rgb, solid) => {
+    for (const [x, y, rad] of puffs) {
+      const gr = g.createRadialGradient(x + dx, y + dy, 0, x + dx, y + dy, rad * k);
+      gr.addColorStop(0, `rgba(${rgb},1)`); gr.addColorStop(solid, `rgba(${rgb},1)`); gr.addColorStop(1, `rgba(${rgb},0)`);
+      g.fillStyle = gr; g.beginPath(); g.arc(x + dx, y + dy, rad * k, 0, 7); g.fill();
+    }
+  };
+  pass(0, 6, 1.0, '150,180,226', 0.84);        // shaded body
+  pass(-3, -2, 0.93, '204,222,246', 0.74);      // mid tone
+  pass(-7, -9, 0.8, '255,255,255', 0.66);       // sunlit tops
+  g.globalCompositeOperation = 'destination-out';                                                 // soft flat underside
+  const cutG = g.createLinearGradient(0, H * 0.74, 0, H * 0.9); cutG.addColorStop(0, 'rgba(0,0,0,0)'); cutG.addColorStop(1, 'rgba(0,0,0,1)');
+  g.fillStyle = cutG; g.fillRect(0, H * 0.74, W, H * 0.26);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+}
+function cumulus(r) {
+  const group = new THREE.Group();
+  const mats = Array.from({ length: 5 }, () => new THREE.SpriteMaterial({ map: cloudTexture(r), fog: false, depthWrite: false, transparent: true, toneMapped: false }));
+  const N = 26;
+  for (let i = 0; i < N; i++) {
+    const low = i % 4 === 0, a = i / N * Math.PI * 2 + r() * 0.2, rad = 400 + r() * 110, w = low ? 200 + r() * 110 : 110 + r() * 130;
+    const sp = new THREE.Sprite(mats[i % mats.length]);
+    sp.position.set(Math.cos(a) * rad, low ? 45 + r() * 40 : 110 + r() * 200, Math.sin(a) * rad);
+    sp.scale.set(w * (r() < 0.5 ? 1 : -1), w * 288 / 512, 1);
+    group.add(sp);
+  }
+  return group;
 }
 
 function islandMesh(radius, depth, seed, segs = 56) {
@@ -244,7 +266,7 @@ function grassField(r, U, o) {
 // Leaves: thousands of small flat leaves on the surface of every tree's crown, each catching the light
 // at its own angle and fluttering in the wind.
 function leafCloud(r, U, trees) {
-  const geo = new THREE.CircleGeometry(0.125, 6); geo.scale(1.7, 1, 1);
+  const geo = new THREE.CircleGeometry(0.11, 4); geo.scale(2.0, 1, 1);     // a pointed leaf
   const mat = new THREE.MeshLambertMaterial({ side: THREE.DoubleSide });
   mat.customProgramCacheKey = () => 'leaves';
   mat.onBeforeCompile = s => {
@@ -252,11 +274,14 @@ function leafCloud(r, U, trees) {
     s.vertexShader = 'uniform float uTime;\n' + s.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>
       vec3 lp = instanceMatrix[3].xyz;
       float fl = sin(uTime * 3.1 + lp.x * 1.7 + lp.z * 1.3 + lp.y) * 0.5 + sin(uTime * 1.3 + lp.x * 0.3) * 0.5;
-      transformed.z += fl * 0.07 * (abs(position.x) + 0.1);`);
+      transformed.z += fl * 0.07 * (abs(position.x) + 0.1);`)
+      // light every leaf partly as if it faced the sky, so the shaded side of a crown stays green instead of going black
+      .replace('#include <defaultnormal_vertex>', `#include <defaultnormal_vertex>
+      transformedNormal = normalize(mix(transformedNormal, normalMatrix * vec3(0.0, 1.0, 0.0), 0.55));`);
   };
-  const PER = 150, total = trees.reduce((n, t) => n + t.userData.puffs.length * PER, 0);
+  const PER = 280, total = trees.reduce((n, t) => n + t.userData.puffs.length * PER, 0);
   const m = new THREE.InstancedMesh(geo, mat, total), d = new THREE.Object3D(), c = new THREE.Color(), n = new THREE.Vector3(), p = new THREE.Vector3();
-  const lo = new THREE.Color(0x1d7a30), hi = new THREE.Color(0xd9f56a), zAxis = new THREE.Vector3(0, 0, 1);
+  const lo = new THREE.Color(0x1f8236), mid = new THREE.Color(0x5cc044), hi = new THREE.Color(0xf2ff86), zAxis = new THREE.Vector3(0, 0, 1);
   let k = 0;
   for (const t of trees) {
     t.updateMatrixWorld(true);
@@ -267,9 +292,11 @@ function leafCloud(r, U, trees) {
       p.set(x + n.x * s * 1.04, y + n.y * s * 0.84, z + n.z * s * 1.04).applyMatrix4(t.matrixWorld);
       n.transformDirection(t.matrixWorld);
       d.position.copy(p); d.quaternion.setFromUnitVectors(zAxis, n);
-      d.rotateZ(r() * 6.283); d.rotateX((r() - 0.5) * 1.1); d.rotateY((r() - 0.5) * 1.1);
-      d.scale.setScalar(sc * (0.7 + r() * 0.7)); d.updateMatrix(); m.setMatrixAt(k, d.matrix);
-      c.copy(lo).lerp(hi, THREE.MathUtils.clamp(n.y * 0.55 + 0.4 + (r() - 0.5) * 0.35, 0, 1)); m.setColorAt(k, c);
+      d.rotateZ(r() * 6.283); d.rotateX((r() - 0.5) * 0.7); d.rotateY((r() - 0.5) * 0.7);
+      d.scale.setScalar(sc * (0.42 + r() * 0.42)); d.updateMatrix(); m.setMatrixAt(k, d.matrix);
+      const lit = THREE.MathUtils.clamp(n.y * 0.5 + 0.38 + n.dot(SUN_DIR) * 0.22 + (y - 3.9) * 0.14 + (r() - 0.5) * 0.3, 0, 1);
+      if (lit < 0.5) c.copy(lo).lerp(mid, lit * 2); else c.copy(mid).lerp(hi, (lit - 0.5) * 2);
+      m.setColorAt(k, c);
     }
   }
   m.castShadow = false; m.receiveShadow = true; m.frustumCulled = false; m.userData.full = total;
@@ -282,7 +309,7 @@ function flowers(r) {
   const petal = new THREE.CircleGeometry(0.13, 10), pp = petal.attributes.position;
   for (let i = 1; i < pp.count; i++) if (i % 2 === 0) pp.setXYZ(i, pp.getX(i) * 0.42, pp.getY(i) * 0.42, 0);
   petal.rotateX(-Math.PI / 2);
-  const heart = new THREE.SphereGeometry(0.04, 8, 6);
+  const heart = new THREE.SphereGeometry(0.026, 8, 6);
   const pm = new THREE.InstancedMesh(petal, new THREE.MeshLambertMaterial({ color: 0xffffff, side: THREE.DoubleSide }), N);
   const hm = new THREE.InstancedMesh(heart, new THREE.MeshLambertMaterial({ color: 0xffd23e }), N);
   const d = new THREE.Object3D(), c = new THREE.Color(), hues = [0xff7fb0, 0xc58cff, 0xffe45a, 0xffffff, 0xff9a5a, 0x8fb8ff];
@@ -315,7 +342,7 @@ function blobGeo(r, sx, sy, sz, amp, lo, hi) {
 }
 
 const trunkMat = new THREE.MeshStandardMaterial({ color: 0x6d4a34, roughness: 0.9 });
-const leafMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8 });
+const leafMat = new THREE.MeshStandardMaterial({ vertexColors: true, color: 0xc0d2ba, emissive: 0x1f5c26, emissiveIntensity: 0.55, roughness: 0.9 });   // the shaded inside of the crown
 const twigMat = new THREE.MeshStandardMaterial({ color: 0x3a3430, roughness: 1 });
 const rockMat = new THREE.MeshStandardMaterial({ color: 0xa9a39a, roughness: 0.9 });
 const LEAF = [[0x1c7a34, 0xcdf060], [0x268a3a, 0xe0f56a], [0x1a7240, 0xb4ea58]].map(p => p.map(c => new THREE.Color(c)));
@@ -355,8 +382,19 @@ function tree(r, bareGeo) {
   const trunk = new THREE.Mesh(tg, trunkMat); trunk.castShadow = true; g.add(trunk);
 
   const leaves = new THREE.Group(), pal = LEAF[Math.floor(r() * LEAF.length)];
-  const puffs = [[0, 3.6, 0, 1.35], [-1.1, 3.2, 0.3, 1.0], [1.1, 3.3, -0.2, 1.05], [0.2, 4.5, 0.2, 1.0], [-0.4, 3.4, -1.0, 0.95], [0.5, 3.1, 1.0, 0.9],
-    [-0.8, 4.1, 0.6, 0.8], [0.9, 4.2, 0.5, 0.78], [0.1, 4.0, -0.9, 0.8], [-1.5, 3.5, -0.5, 0.7], [1.5, 3.6, 0.6, 0.68], [0, 5.1, -0.1, 0.7]];
+  // a broad, slightly flattened crown
+  const puffs = [[0, 3.7, 0, 1.45], [-1.5, 3.3, 0.3, 1.1], [1.5, 3.4, -0.2, 1.15], [0.2, 4.7, 0.2, 1.05], [-0.5, 3.5, -1.5, 1.05], [0.6, 3.2, 1.5, 1.0],
+    [-1.2, 4.3, 0.9, 0.9], [1.3, 4.4, 0.7, 0.88], [0.1, 4.2, -1.3, 0.9], [-2.3, 3.4, -0.6, 0.8], [2.3, 3.5, 0.7, 0.78], [0, 5.3, -0.1, 0.75],
+    [-1.4, 3.1, -1.6, 0.75], [1.6, 3.0, -1.5, 0.75]];
+  // limbs forking from the top of the trunk into the crown
+  const limbs = [], up = new THREE.Vector3(0, 1, 0), from = new THREE.Vector3(0.14, 2.7, 0), q = new THREE.Quaternion();
+  for (const i of [1, 2, 4, 5, 3]) {
+    const to = new THREE.Vector3(puffs[i][0], puffs[i][1] - 0.1, puffs[i][2]), dir = to.clone().sub(from), len = dir.length() * 0.85;
+    const lg = new THREE.CylinderGeometry(0.05, 0.15, len, 8, 1, true);
+    lg.applyQuaternion(q.setFromUnitVectors(up, dir.normalize())); lg.translate(from.x + dir.x * len / 2, from.y + dir.y * len / 2, from.z + dir.z * len / 2);
+    limbs.push(lg);
+  }
+  const limbMesh = new THREE.Mesh(mergeGeometries(limbs), trunkMat); limbMesh.castShadow = true; g.add(limbMesh);
   for (const [x, y, z, s] of puffs) {
     const b = new THREE.Mesh(blobGeo(r, s, s * 0.8, s, 0.2, pal[0], pal[1]), leafMat);
     b.position.set(x, y, z); b.castShadow = true; b.receiveShadow = true; leaves.add(b);

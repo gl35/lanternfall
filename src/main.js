@@ -518,7 +518,7 @@ function updateCamera(dtReal) {
   let D = D0, H = portrait ? 4.6 : 3.8;
   // keep the camera out of the trees: slide it in toward the player, or duck under the canopy
   const blocked = (d, k) => TREES.some(t => Math.hypot(player.x - tmpF.x * d - t.x, player.z - tmpF.z * d - t.z) < k * t.s);
-  while (D > 3 && blocked(D, 3.7)) D -= 0.5;
+  while (D > 3 && blocked(D, 4.6)) D -= 0.5;
   if (D <= 3) { H = 2.3; D = D0 * 0.75; while (D > 1.6 && blocked(D, 1.2)) D -= 0.4; }
   camPos.set(player.x - tmpF.x * D, H + player.y * 0.5, player.z - tmpF.z * D);
   camAt.set(player.x + tmpF.x * 7, 1.7 + player.y * 0.5, player.z + tmpF.z * 7);
