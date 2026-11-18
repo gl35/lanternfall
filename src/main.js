@@ -24,11 +24,28 @@ const camBase = new THREE.Vector3(), camLook = new THREE.Vector3(0, 2.4, 1.5), l
 const hero = new THREE.Group();
 hero.position.set(LAUNCH.x - 0.95, LAUNCH.y - 0.47, LAUNCH.z + 0.1);
 scene.add(hero);
-let heroKick = 0, heroLoaded = false;
-new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).load(import.meta.env.BASE_URL + 'models/general.glb', g => {
+let heroKick = 0, heroWind = 0, heroLoaded = false;
+const bones = {}, rest = {}, restW = {};
+const _q = new THREE.Quaternion(), _d = new THREE.Quaternion(), _e = new THREE.Euler();
+// Rotate a bone away from its rest pose by angles given in the character's own frame
+// (x = his right, y = up, he faces -z), so poses don't depend on each bone's local axes.
+function pose(name, rx, ry, rz) {
+  const b = bones[name]; if (!b) return;
+  _d.setFromEuler(_e.set(rx, ry, rz, 'YXZ'));
+  _q.copy(restW[name]).invert().multiply(_d).multiply(restW[name]);
+  b.quaternion.copy(rest[name]).multiply(_q);
+}
+new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).load(import.meta.env.BASE_URL + 'models/general-rigged.glb', g => {
   g.scene.scale.setScalar(2.5); g.scene.rotation.y = Math.PI;      // model faces +z; turn it toward the island
   g.scene.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
-  hero.add(g.scene); heroLoaded = true;
+  g.scene.traverse(o => {
+    if (o.isSkinnedMesh) o.frustumCulled = false;
+    if (o.isBone) { const k = o.name.replace(/^mixamorig:?/, ''); bones[k] = o; rest[k] = o.quaternion.clone(); }
+  });
+  hero.add(g.scene); hero.updateMatrixWorld(true);
+  const inv = hero.getWorldQuaternion(new THREE.Quaternion()).invert();
+  for (const k in bones) restW[k] = inv.clone().multiply(bones[k].getWorldQuaternion(new THREE.Quaternion()));
+  heroLoaded = true;
 }, undefined, e => console.error('character model failed to load', e));
 
 function resize() {
@@ -402,13 +419,21 @@ function step(dtReal) {
     readyBall.position.set(LAUNCH.x - Math.sin(aim.yaw) * pull * 0.7, LAUNCH.y + pull * 0.1 + Math.sin(time * 2.4) * 0.03, LAUNCH.z + Math.cos(aim.yaw) * pull * 0.7);
   }
   showDots();
-  {                                                        // the thrower leans back while aiming and lunges on release
-    const pull = aim.on && aim.valid ? aim.power : 0;
-    heroKick = Math.max(0, heroKick - dtReal * 2.5);
-    const lean = pull * 0.2 - Math.sin(heroKick * Math.PI) * 0.4;
-    hero.rotation.x += (lean - hero.rotation.x) * Math.min(1, dtReal * 14);
-    hero.rotation.y += ((aim.on ? -aim.yaw * 0.8 : 0) + 0.3 - hero.rotation.y) * Math.min(1, dtReal * 8);
-    hero.position.y = LAUNCH.y - 0.47 + Math.sin(time * 1.8) * 0.012;
+  if (heroLoaded) {                                        // the thrower: idle, wind up while aiming, throw on release
+    const pull = aim.on && aim.valid && readyBall ? aim.power : 0;
+    heroKick = Math.max(0, heroKick - dtReal * 2.2);
+    heroWind += (pull - heroWind) * Math.min(1, dtReal * (pull > heroWind ? 10 : 22));
+    const dbg = window.__pose, w = dbg ? dbg.w : heroWind, th = dbg ? dbg.th : Math.sin(Math.min(1, heroKick * 1.15) * Math.PI);
+    const br = Math.sin(time * 1.8), yaw = aim.on ? aim.yaw : 0;
+    hero.rotation.y += (-yaw * 0.8 + 0.25 - hero.rotation.y) * Math.min(1, dtReal * 8);
+    hero.rotation.x = 0;
+    pose('Spine', 0.02 * br + 0.14 * w - 0.25 * th, -0.22 * w + 0.3 * th, 0);
+    pose('Spine1', 0.08 * w - 0.15 * th, -0.2 * w + 0.28 * th, 0);
+    pose('Spine2', 0, -0.15 * w + 0.2 * th, 0);
+    pose('RightArm', 0.04 * br + 1.5 * w - 1.0 * th, 0, 0);
+    pose('RightForeArm', 0.5 * w - 0.3 * th, 0, 0);
+    pose('LeftArm', 0.04 * br - 0.35 * w + 0.4 * th, 0, 0);
+    pose('Head', -0.12 * w + 0.1 * th, Math.sin(time * 0.6) * 0.14 * (1 - w) - yaw * 0.4, 0);
   }
   for (const o of objs) {                                  // fire trail behind flying balls
     if (o.kind !== 'ball' || o.body.velocity.lengthSquared() < 9 || Math.random() > dt * 70) continue;
@@ -425,9 +450,9 @@ function step(dtReal) {
   const tx = ball && ball.body.position.y > -3 ? ball.body.position.x * 0.22 : 0;
   lookNow.x += (tx - lookNow.x) * Math.min(1, dtReal * 3);
   shake = Math.max(0, shake - dtReal * 1.6);
-  camera.position.set(camBase.x + Math.sin(time * 0.22) * 0.5 + lookNow.x * 0.5 + rnd(shake) * 0.5,
+  if (!window.__freecam) camera.position.set(camBase.x + Math.sin(time * 0.22) * 0.5 + lookNow.x * 0.5 + rnd(shake) * 0.5,
     camBase.y + Math.sin(time * 0.31) * 0.2 + rnd(shake) * 0.5, camBase.z);
-  camera.lookAt(lookNow.x, camLook.y, camLook.z);
+  if (!window.__freecam) camera.lookAt(lookNow.x, camLook.y, camLook.z);
 }
 
 let last = performance.now();
@@ -441,7 +466,7 @@ function frame(now) {
 // Scripted stepping for tests (the preview pane only runs frames while visible).
 window.game = {
   step(seconds = 1, dt = 1 / 60) { window.__manual = true; for (let t = 0; t < seconds; t += dt) step(dt); renderer.render(scene, camera); return this.state(); },
-  fling,
+  fling, debug: { camera, hero, bones, rest, THREE },
   setLevel(n) { level = n; buildLevel(); },
   auto() { window.__manual = false; },
   state() {
