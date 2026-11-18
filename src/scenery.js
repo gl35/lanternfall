@@ -306,24 +306,30 @@ function leafCloud(r, U, trees) {
       mvPosition.xy += lq;
       gl_Position = projectionMatrix * mvPosition;`);
   };
-  const PER = 135, BASE_Y = 2.75, total = trees.reduce((n, t) => n + t.userData.puffs.length * PER, 0);
+  const PER = 215, UNDER = 45, BASE_Y = 2.75, total = trees.reduce((n, t) => n + t.userData.puffs.length * (PER + UNDER), 0);
   const m = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1), mat, total), d = new THREE.Object3D(), c = new THREE.Color();
   const n = new THREE.Vector3(), p = new THREE.Vector3(), sunXZ = new THREE.Vector2(SUN_DIR.x, SUN_DIR.z).normalize();
   let k = 0;
   for (const t of trees) {
     t.updateMatrixWorld(true);
     const sc = t.scale.x, cy = Math.cos(t.rotation.y), sy = Math.sin(t.rotation.y);
+    for (const [x, y, z, s] of t.userData.puffs) for (let i = 0; i < UNDER; i++, k++) {   // a shaded layer closing off the underside
+      const a = r() * 6.283, rr = Math.sqrt(r()) * s * 0.95;
+      p.set(x + Math.cos(a) * rr, Math.max(BASE_Y, y - s * 0.5) + r() * 0.35, z + Math.sin(a) * rr).applyMatrix4(t.matrixWorld);
+      d.position.copy(p); d.scale.setScalar(sc * s * (0.6 + r() * 0.35)); d.updateMatrix(); m.setMatrixAt(k, d.matrix);
+      c.copy(TONES[0]).lerp(TONES[1], r() * 0.8); m.setColorAt(k, c);
+    }
     for (const [x, y, z, s] of t.userData.puffs) for (let i = 0; i < PER; i++, k++) {
       let ly = 0, rad = 1;
       for (let tries = 0; tries < 12; tries++) {             // nothing below the flat underside of the crown
         const cu = r() * 1.7 - 0.7, a = r() * 6.283, q = Math.sqrt(1 - cu * cu);
-        n.set(Math.cos(a) * q, cu, Math.sin(a) * q); rad = 0.7 + r() * 0.36; ly = y + n.y * s * 0.84 * rad;
+        n.set(Math.cos(a) * q, cu, Math.sin(a) * q); rad = 0.55 + r() * 0.52; ly = y + n.y * s * 0.84 * rad;
         if (ly > BASE_Y) break;
       }
       p.set(x + n.x * s * rad, Math.max(BASE_Y, ly), z + n.z * s * rad).applyMatrix4(t.matrixWorld);
       d.position.copy(p); d.scale.setScalar(sc * s * (0.62 + r() * 0.4)); d.updateMatrix(); m.setMatrixAt(k, d.matrix);
       const wx = n.x * cy + n.z * sy, wz = -n.x * sy + n.z * cy;                                   // lobe normal turned with the tree
-      const tone = n.y * 0.62 + (wx * sunXZ.x + wz * sunXZ.y) * 0.3 + (ly - 3.9) * 0.17 + (rad - 0.9) * 0.5 + (r() - 0.5) * 0.3 + 0.46;
+      const tone = n.y * 0.62 + (wx * sunXZ.x + wz * sunXZ.y) * 0.3 + (ly - 3.9) * 0.17 + (rad - 0.85) * 0.5 + (r() - 0.5) * 0.3 + 0.46;
       const f = THREE.MathUtils.clamp(tone, 0, 0.999) * (TONES.length - 1), i0 = Math.floor(f);
       c.copy(TONES[i0]).lerp(TONES[i0 + 1], Math.min(1, (f - i0) * 1.6));                           // mostly flat bands, soft at the joins
       m.setColorAt(k, c);
@@ -355,15 +361,37 @@ function barkTexture(r) {
   return t;
 }
 
-function flowers(r) {
+// The same travelling gust the grass uses, so a flower leans with the blades around it.
+const GUST_GLSL = `float gustAt(vec2 wp, float t) {
+    float g = sin(wp.x * 0.21 + wp.y * 0.12 - t * 1.5 + sin(wp.y * 0.08 + t * 0.25) * 2.2) * 0.5 + 0.5;
+    g = g * g * (0.75 + 0.25 * sin(wp.x * 0.05 - wp.y * 0.07 + t * 0.4));
+    return 0.1 + g * 0.62 + sin(t * 4.3 + wp.x * 2.1 - wp.y * 1.7) * 0.07;
+  }`;
+function swayWithGrass(mat, U) {
+  mat.customProgramCacheKey = () => 'flower-sway';
+  mat.onBeforeCompile = s => {
+    s.uniforms.uTime = U.time;
+    s.vertexShader = 'uniform float uTime;\n' + GUST_GLSL + '\n' + s.vertexShader.replace('#include <project_vertex>', `
+      vec4 mvPosition = instanceMatrix * vec4(transformed, 1.0);
+      vec3 fo = instanceMatrix[3].xyz;
+      float fb = gustAt(fo.xz, uTime), lean = fb * fo.y * fo.y;
+      vec3 off = mvPosition.xyz - fo;
+      mvPosition.xz += vec2(0.86, 0.5) * lean;
+      mvPosition.y -= lean * lean * 0.25 + dot(off.xz, vec2(0.86, 0.5)) * fb * 0.9;      // the head tips over as it leans
+      mvPosition = modelViewMatrix * mvPosition;
+      gl_Position = projectionMatrix * mvPosition;`);
+  };
+  return mat;
+}
+function flowers(r, U) {
   const g = new THREE.Group(), N = 2600;
   // five-petal star: a flat disc with every other rim vertex pulled in
   const petal = new THREE.CircleGeometry(0.13, 10), pp = petal.attributes.position;
   for (let i = 1; i < pp.count; i++) if (i % 2 === 0) pp.setXYZ(i, pp.getX(i) * 0.42, pp.getY(i) * 0.42, 0);
   petal.rotateX(-Math.PI / 2);
   const heart = new THREE.SphereGeometry(0.026, 8, 6);
-  const pm = new THREE.InstancedMesh(petal, new THREE.MeshLambertMaterial({ color: 0xffffff, side: THREE.DoubleSide }), N);
-  const hm = new THREE.InstancedMesh(heart, new THREE.MeshLambertMaterial({ color: 0xffd23e }), N);
+  const pm = new THREE.InstancedMesh(petal, swayWithGrass(new THREE.MeshLambertMaterial({ color: 0xffffff, side: THREE.DoubleSide }), U), N);
+  const hm = new THREE.InstancedMesh(heart, swayWithGrass(new THREE.MeshLambertMaterial({ color: 0xffd23e }), U), N);
   const d = new THREE.Object3D(), c = new THREE.Color(), hues = [0xff7fb0, 0xc58cff, 0xffe45a, 0xffffff, 0xff9a5a, 0x8fb8ff];
   let cx = 0, cz = 0, hue = 0;
   for (let i = 0; i < N; i++) {
@@ -375,6 +403,7 @@ function flowers(r) {
     c.set(r() < 0.75 ? hues[hue] : hues[Math.floor(r() * hues.length)]); pm.setColorAt(i, c);
     d.position.y += 0.02 * s; d.updateMatrix(); hm.setMatrixAt(i, d.matrix);
   }
+  pm.frustumCulled = hm.frustumCulled = false;
   g.add(pm, hm);
   return g;
 }
@@ -449,8 +478,8 @@ function tree(r, bareGeo) {
   }
   const limbMesh = new THREE.Mesh(mergeGeometries(limbs), trunkMat); limbMesh.castShadow = true; g.add(limbMesh);
   for (const [x, y, z, s] of puffs) {
-    const b = new THREE.Mesh(blobGeo(r, s * 0.74, s * 0.6, s * 0.74, 0.15), leafMat);
-    b.position.set(x, y, z); b.castShadow = true; leaves.add(b);
+    const b = new THREE.Mesh(blobGeo(r, s * 0.56, s * 0.44, s * 0.56, 0.12), leafMat);
+    b.position.set(x, Math.max(y, 2.95 + s * 0.5), z);       // never pokes out below the leaves b.castShadow = true; leaves.add(b);
   }
   const bare = new THREE.Mesh(bareGeo, twigMat); bare.castShadow = true; bare.visible = false;
   g.add(leaves, bare);
@@ -498,7 +527,7 @@ export function buildScenery(scene) {
   scene.add(islandMesh(R, 24, 1.3, 120));
   const ground = meadow(r); scene.add(ground.mesh);
   const grassNear = grassField(r, U, GRASS_NEAR), grassFar = grassField(r, U, GRASS_FAR); scene.add(grassNear, grassFar);
-  const blooms = flowers(r); scene.add(blooms);
+  const blooms = flowers(r, U); scene.add(blooms);
 
   const bareGeos = [branchGeo(r), branchGeo(r), branchGeo(r)], trees = [];
   TREES.forEach((t, i) => {
