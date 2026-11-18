@@ -488,6 +488,13 @@ function physics(dt) {
   for (const o of [...objs]) {
     const p = o.body.position;
     o.age += dt;
+    if (o.kind === 'ball') {
+      const gh = hillHeight(p.x, p.z), v = o.body.velocity;
+      if (gh > 0.05 && p.y < gh + BALL_R) {                  // the hills are not in the physics world: bounce it off the slope by hand
+        p.y = gh + BALL_R; if (v.y < 0) { if (v.y < -4) dust(p.x, gh + 0.1, p.z, 2); v.y *= -0.35; } v.x *= 0.9; v.z *= 0.9;
+      }
+      for (const b of beacons) if (!b.lit && Math.hypot(p.x - b.x, p.z - b.z) < 1.9 && p.y > b.h - 0.5 && p.y < b.h + 8) { lightBeacon(b); o.age = 99; }
+    }
     if (!o.splashed && p.y < -8) { o.splashed = true; splash(p.x, p.z, o.kind !== 'lantern'); if (o.kind === 'lantern') burst(o); }
     if (objs.includes(o) && (p.y < -22 || (o.kind === 'ball' && o.age > 7))) {
       if (o.kind === 'ball' && p.y > -5) dust(p.x, p.y, p.z, 3);
@@ -495,6 +502,78 @@ function physics(dt) {
     }
   }
   for (const o of objs) { o.mesh.position.copy(o.body.position); o.mesh.quaternion.copy(o.body.quaternion); }
+}
+
+// ---------- out in the hills: beacons to light, and trails of little lights that lead to them ----------
+// Eight stone beacons stand on high ground around the meadow. A fireball lights one for good. From the
+// meadow's edge a wandering line of floating lights runs to each beacon; he gathers them by passing through.
+const beacons = [], motes = [];
+let moteCombo = 0, moteT = 0;
+const elBeacons = document.getElementById('beacons');
+{
+  const rng = mulberry(4242), N = 8;
+  const pillarGeo = new THREE.CylinderGeometry(0.55, 0.9, 4.4, 14), bowlGeo = new THREE.CylinderGeometry(1.25, 0.6, 0.8, 20), footGeo = new THREE.CylinderGeometry(1.3, 1.5, 0.5, 16);
+  const flameMat = new THREE.MeshBasicMaterial({ color: 0xffb040, toneMapped: false });
+  const clear = (x, z, pad) => !WOODS.some(t => Math.hypot(t.x - x, t.z - z) < t.r * 2.2 + pad);
+  for (let i = 0; i < N; i++) {
+    let best = null;
+    for (let k = 0; k < 80; k++) {                           // the highest clear spot in this beacon's slice of the hills
+      const a = (i + 0.15 + rng() * 0.7) / N * Math.PI * 2, rad = 80 + rng() * 80, x = Math.cos(a) * rad, z = Math.sin(a) * rad, h = hillHeight(x, z);
+      if (clear(x, z, 4) && (!best || h > best.h)) best = { x, z, h };
+    }
+    const { x, z, h } = best, g = new THREE.Group(); g.position.set(x, h, z);
+    const foot = new THREE.Mesh(footGeo, MAT.stone); foot.position.y = 0.1;
+    const pillar = new THREE.Mesh(pillarGeo, MAT.stone); pillar.position.y = 2.4;
+    const bowl = new THREE.Mesh(bowlGeo, MAT.dark); bowl.position.y = 4.9;
+    for (const m of [foot, pillar, bowl]) { m.castShadow = m.receiveShadow = true; }
+    const mark = haloSprite(5, 0.3); mark.position.y = 5.6;                                   // a pale glint so an unlit one can be spotted from afar
+    const flame = new THREE.Mesh(sphereGeo, flameMat); flame.position.y = 5.9; flame.visible = false;
+    const glow = haloSprite(13, 0.85, 0xffa040); glow.position.y = 6.1; glow.visible = false;
+    const beam = haloSprite(1, 0.5, 0xffc060); beam.scale.set(7, 150, 1); beam.position.y = 62; beam.visible = false;   // a column of light, seen across the hills
+    g.add(foot, pillar, bowl, mark, flame, glow, beam); scene.add(g);
+    beacons.push({ x, z, h, lit: false, mark, flame, glow, beam, phase: rng() * 6 });
+    const dot = document.createElement('i'); elBeacons.appendChild(dot);
+    // the trail
+    const dist = Math.hypot(x, z), ux = x / dist, uz = z / dist;
+    for (let d = R + 5; d < dist - 7; d += 8.5) {
+      const w = Math.sin(d * 0.07 + i * 1.7) * 7 * Math.min(1, (d - R) / 20, (dist - d) / 20), mx = ux * d - uz * w, mz = uz * d + ux * w;
+      if (!clear(mx, mz, 1)) continue;
+      const m = new THREE.Group(), core = new THREE.Mesh(sphereGeo, MAT.paper); core.scale.setScalar(0.2);
+      m.add(core, haloSprite(1.9, 0.7)); m.position.set(mx, hillHeight(mx, mz) + 1.4, mz); m.visible = false; scene.add(m);
+      motes.push({ x: mx, z: mz, y: m.position.y, mesh: m, phase: rng() * 6 });
+    }
+  }
+}
+function lightBeacon(b) {
+  if (b.lit) return;
+  b.lit = true; b.mark.visible = false; b.flame.visible = b.glow.visible = b.beam.visible = true;
+  fireflies(b.x, b.h + 6, b.z, 40); sfx.win(); shake = Math.max(shake, 0.3);
+  const lit = beacons.filter(q => q.lit).length;
+  [...elBeacons.children].forEach((d, i) => d.classList.toggle('on', i < lit));
+  if (lit === beacons.length) { for (const q of beacons) fireflies(q.x, q.h + 8, q.z, 60); setTimeout(() => sfx.win(), 700); }
+}
+function updateHills(dt) {
+  const reach = HERO.mount ? 2.6 : 1.9;
+  moteT -= dt; if (moteT <= 0) moteCombo = 0;
+  for (let i = motes.length - 1; i >= 0; i--) {
+    const m = motes[i], d = Math.hypot(m.x - player.x, m.z - player.z);
+    m.mesh.visible = d < 75;
+    if (!m.mesh.visible) continue;
+    m.mesh.position.y = m.y + Math.sin(time * 1.8 + m.phase) * 0.18;
+    if (d < reach && player.y < 3) {
+      scene.remove(m.mesh); motes.splice(i, 1);
+      fireflies(m.x, m.y, m.z, 6, false); sfx.chime(moteCombo++); moteT = 4;
+    }
+  }
+  for (const b of beacons) {
+    const dx = player.x - b.x, dz = player.z - b.z, d = Math.hypot(dx, dz);
+    if (d < 1.9 && d > 1e-4) { player.x = b.x + dx / d * 1.9; player.z = b.z + dz / d * 1.9; }
+    if (!b.lit) { b.mark.material.opacity = 0.22 + Math.sin(time * 2 + b.phase) * 0.1; continue; }
+    const f = 1 + Math.sin(time * 9 + b.phase) * 0.12 + Math.sin(time * 14.3 + b.phase) * 0.07;
+    b.flame.scale.set(0.8 * f, 1.25 / f, 0.8 * f); b.glow.material.opacity = 0.7 + 0.15 * f; b.beam.material.opacity = 0.34 + 0.1 * f;
+    if (d < 70 && Math.random() < dt * 14) spawn(b.x + rnd(0.6), b.h + 6.2, b.z + rnd(0.6), rnd(0.6), 1.6 + Math.random() * 1.6, rnd(0.6), 0.7 + Math.random() * 0.6, 0.8,
+      { color: Math.random() < 0.5 ? 0xff6a1a : 0xffc050, grow: -0.5, alpha: 0.85 });
+  }
 }
 
 function jump() {
@@ -566,6 +645,7 @@ function step(dtReal) {
   if ((comboT -= dt) <= 0) combo = 0;
 
   movePlayer(dt);
+  updateHills(dt);
   physics(dt);
 
   if (state === 'won') {
@@ -632,13 +712,13 @@ function frame(now) {
 // Scripted stepping for tests (the preview pane only runs frames while visible).
 window.game = {
   step(seconds = 1, dt = 1 / 60) { window.__manual = true; for (let t = 0; t < seconds; t += dt) step(dt); renderer.render(scene, camera); return this.state(); },
-  fling, jump, setHero, debug: { scene, camera, hero, acts, THROW, THREE, player, sites, renderer, get mixer() { return mixer; } },
+  fling, jump, setHero, beacons, motes, lightBeacon, debug: { scene, camera, hero, acts, THROW, THREE, player, sites, renderer, get mixer() { return mixer; } },
   walk(x, y) { window.__joy = x || y ? { x, y } : null; },
   setLevel(n) { level = n; buildLevel(); },
   setSeason(name) { scenery.setSeason(name); },
   auto() { window.__manual = false; },
   state() {
-    return { heroLoaded, hero: heroIx, g: +player.g.toFixed(2), level, season: scenery.season, detail: +detail.toFixed(2), state, lanterns: lanterns.length, total, objects: objs.length, sites: sites.length,
+    return { heroLoaded, lit: beacons.filter(b => b.lit).length, motes: motes.length, hero: heroIx, g: +player.g.toFixed(2), level, season: scenery.season, detail: +detail.toFixed(2), state, lanterns: lanterns.length, total, objects: objs.length, sites: sites.length,
       x: +player.x.toFixed(2), y: +player.y.toFixed(2), z: +player.z.toFixed(2), clips: { ...CLIP, throw: THROW.clip }, hop: [+HOP.t0.toFixed(2), +HOP.t1.toFixed(2)], mode: heroMode, camYaw: +camYaw.toFixed(2),
       moving: objs.filter(o => o.body.sleepState !== CANNON.Body.SLEEPING).length };
   },
