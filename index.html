@@ -18,12 +18,17 @@
          width: 46px; height: 46px; border-radius: 50%; border: 0; pointer-events: auto; cursor: pointer;
          background: rgba(255,255,255,.22); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
   #restart svg { width: 24px; height: 24px; stroke: #fff; fill: none; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
-  #shots { position: absolute; left: 0; right: 0; bottom: calc(22px + env(safe-area-inset-bottom));
-         display: flex; justify-content: center; gap: 10px; }
-  #shots i { width: 16px; height: 16px; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #ff9a6b, #c8321e);
-         box-shadow: 0 2px 6px rgba(80,30,10,.4); transition: transform .25s, opacity .25s; }
-  #shots i.used { opacity: .25; transform: scale(.6); }
-  #hint { position: absolute; left: 50%; bottom: 30%; width: 54px; height: 54px; margin-left: -27px; border-radius: 50%;
+  #count { position: absolute; left: 0; right: 0; top: calc(16px + env(safe-area-inset-top)); display: flex; justify-content: center;
+         align-items: center; gap: 8px; font-size: 26px; font-weight: 700; text-shadow: 0 2px 10px rgba(90,50,20,.45); }
+  #count i { width: 20px; height: 24px; border-radius: 45%; background: radial-gradient(circle at 40% 35%, #fff3c4, #ffb23a);
+         box-shadow: 0 0 14px #ffc45a; }
+  #joy { position: absolute; left: 24%; bottom: calc(15% + env(safe-area-inset-bottom)); width: 112px; height: 112px; margin: -56px 0 0 -56px;
+         border-radius: 50%; border: 3px solid rgba(255,255,255,.45); background: rgba(255,255,255,.10); opacity: .55; transition: opacity .2s; }
+  #joy.on { opacity: 1; }
+  #knob { position: absolute; left: 50%; top: 50%; width: 48px; height: 48px; margin: -24px 0 0 -24px; border-radius: 50%;
+         background: rgba(255,255,255,.75); box-shadow: 0 2px 8px rgba(80,40,10,.35); }
+  @media (hover: hover) and (pointer: fine) { #joy { display: none; } }
+  #hint { position: absolute; left: 74%; bottom: 34%; width: 54px; height: 54px; margin-left: -27px; border-radius: 50%;
          border: 3px solid rgba(255,255,255,.9); background: rgba(255,255,255,.25); animation: pull 1.6s ease-in-out infinite; }
   #hint.off { display: none; }
   @keyframes pull { 0% { transform: translateY(0) scale(1); opacity: 0; } 15% { opacity: 1; }
@@ -38,7 +43,8 @@
   <div id="lvl">1</div>
   <button id="restart" aria-label="Restart"><svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.6-5.9"/><path d="M20 4v5h-5"/></svg></button>
   <div id="hint"></div>
-  <div id="shots"></div>
+  <div id="count"><i></i><span id="left"></span></div>
+  <div id="joy"><div id="knob"></div></div>
 </div>
 <div id="fade"></div>
 <script type="module" src="/src/main.js"></script>
