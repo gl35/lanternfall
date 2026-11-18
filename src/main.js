@@ -170,11 +170,9 @@ const lanterns = [];
 const pendingBurst = new Set();
 let shake = 0;
 
-let baseY = 0, extra = false;       // set while building on a hill terrace
 function register(body, mesh, kind) {
-  body.position.y += baseY;
   world.addBody(body); scene.add(mesh);
-  const o = { body, mesh, kind, splashed: false, age: 0, extra }; body.userData = o; objs.push(o);
+  const o = { body, mesh, kind, splashed: false, age: 0 }; body.userData = o; objs.push(o);
   body.sleepSpeedLimit = 0.22; body.sleepTimeLimit = 0.5;
   return o;
 }
@@ -331,17 +329,7 @@ function buildLevel() {
     else if (pick === 1) pyramid(s.x, s.z, yaw, Math.min(4, 2 + Math.floor(rng() * (1 + level / 3))));
     else gate(s.x, s.z, yaw);
   });
-  // a tower on the terrace beside every beacon; these are extras, the level ends without them
-  extra = true;
-  for (const pd of terraces) {
-    baseY = pd.top;
-    const yaw = rng() * Math.PI, pick = Math.floor(rng() * 3);
-    if (pick === 0) tower(pd.x, pd.z, yaw, 3 + Math.floor(rng() * 2), rng);
-    else if (pick === 1) pyramid(pd.x, pd.z, yaw, 4);
-    else gate(pd.x, pd.z, yaw);
-  }
-  baseY = 0; extra = false;
-  total = lanternsLeft();
+  total = lanterns.length;
   scenery.setSeason(seasonFor(level));
   player.x = START.x; player.z = START.z; player.face = 0; camYaw = 0; camReady = false;
   state = 'play'; stateT = 0; combo = 0; cooldown = 0;
@@ -353,8 +341,7 @@ const elLvl = document.getElementById('lvl'), elLeft = document.getElementById('
   elFade = document.getElementById('fade'), elHint = document.getElementById('hint'),
   elJoy = document.getElementById('joy'), elKnob = document.getElementById('knob');
 if (localStorage.getItem('lanternfall.played')) elHint.classList.add('off');
-const lanternsLeft = () => lanterns.reduce((n, l) => n + (l.extra ? 0 : 1), 0);
-function hud() { elLvl.textContent = level; elLeft.textContent = lanternsLeft(); }
+function hud() { elLvl.textContent = level; elLeft.textContent = lanterns.length; }
 document.getElementById('restart').addEventListener('click', e => { e.stopPropagation(); transition(false); });
 document.getElementById('hero').addEventListener('click', e => { e.stopPropagation(); setHero(heroIx + 1); sfx.chime(2); });
 function transition(next) {
@@ -483,7 +470,7 @@ function burst(o) {
   fireflies(p.x, p.y, p.z, 14);
   sfx.chime(combo++); comboT = 2.5; slowT = 0.12; shake = Math.max(shake, 0.1);
   removeObj(o); hud();
-  if (lanternsLeft() === 0 && state === 'play') { state = 'won'; stateT = 0; sfx.win(); }
+  if (lanterns.length === 0 && state === 'play') { state = 'won'; stateT = 0; sfx.win(); }
 }
 function physics(dt) {
   acc += dt;
@@ -507,14 +494,6 @@ function physics(dt) {
         p.y = gh + BALL_R; if (v.y < 0) { if (v.y < -4) dust(p.x, gh + 0.1, p.z, 2); v.y *= -0.35; } v.x *= 0.9; v.z *= 0.9;
       }
       for (const b of beacons) if (!b.lit && Math.hypot(p.x - b.x, p.z - b.z) < 1.9 && p.y > b.h - 0.5 && p.y < b.h + 8) { lightBeacon(b); o.age = 99; }
-    } else if (o.extra && o.body.sleepState !== CANNON.Body.SLEEPING) {
-      const gh = hillHeight(p.x, p.z);
-      if (p.y < gh + 0.32 && !terraces.some(t => Math.hypot(p.x - t.x, p.z - t.z) < t.r + 0.2)) {
-        if (o.kind === 'lantern') { burst(o); continue; }
-        const v = o.body.velocity, w = o.body.angularVelocity;
-        if (v.y < -3 && near(p)) { dust(p.x, gh + 0.1, p.z, 2); sfx.thump(-v.y / 16); }
-        p.y = gh + 0.32; v.set(v.x * 0.8, Math.max(0, v.y), v.z * 0.8); w.scale(0.8, w);
-      }
     }
     if (!o.splashed && p.y < -8) { o.splashed = true; splash(p.x, p.z, o.kind !== 'lantern'); if (o.kind === 'lantern') burst(o); }
     if (objs.includes(o) && (p.y < -22 || (o.kind === 'ball' && o.age > 7))) {
@@ -565,29 +544,6 @@ const elBeacons = document.getElementById('beacons');
     }
   }
 }
-const terraces = [];
-{
-  const PR = 4.4, topMat = new THREE.MeshStandardMaterial({ color: 0xd9d2c4, roughness: 0.95 });
-  for (const b of beacons) {
-    const d = Math.hypot(b.x, b.z), ux = b.x / d, uz = b.z / d;
-    let best = null;
-    for (const [side, back] of [[1, 0], [-1, 0], [1, -6], [-1, -6], [0, -13], [1, 6], [-1, 6]]) {      // beside the beacon, on the flattest clear patch
-      const off = side ? 11 : 0, x = b.x - uz * off * side + ux * back, z = b.z + ux * off * side + uz * back;
-      if (WOODS.some(t => Math.hypot(t.x - x, t.z - z) < t.r * 2.2 + PR + 1)) continue;
-      let lo = 1e9, hi = -1e9;
-      for (let k = 0; k < 12; k++) { const h = hillHeight(x + Math.cos(k * 0.5236) * PR, z + Math.sin(k * 0.5236) * PR); lo = Math.min(lo, h); hi = Math.max(hi, h); }
-      hi = Math.max(hi, hillHeight(x, z));
-      if (!best || hi - lo < best.hi - best.lo) best = { x, z, lo, hi };
-    }
-    if (!best) continue;
-    const top = best.hi + 0.12, H = top - best.lo + 1.5;
-    const wall = new THREE.Mesh(new THREE.CylinderGeometry(PR, PR + 0.35, H, 36), MAT.stone); wall.position.set(best.x, top - H / 2, best.z); wall.castShadow = wall.receiveShadow = true;
-    const cap = new THREE.Mesh(new THREE.CylinderGeometry(PR - 0.25, PR - 0.25, 0.06, 36), topMat); cap.position.set(best.x, top + 0.005, best.z); cap.receiveShadow = true;
-    scene.add(wall, cap);
-    addStatic(new CANNON.Cylinder(PR, PR, H, 20), best.x, top - H / 2, best.z);
-    terraces.push({ x: best.x, z: best.z, top, r: PR });
-  }
-}
 function lightBeacon(b) {
   if (b.lit) return;
   b.lit = true; b.mark.visible = false; b.flame.visible = b.glow.visible = b.beam.visible = true;
@@ -612,13 +568,6 @@ function updateHills(dt) {
   for (const b of beacons) {
     const dx = player.x - b.x, dz = player.z - b.z, d = Math.hypot(dx, dz);
     if (d < 1.9 && d > 1e-4) { player.x = b.x + dx / d * 1.9; player.z = b.z + dz / d * 1.9; }
-  }
-  for (const t of terraces) {                              // he walks round a terrace, not onto it
-    const dx = player.x - t.x, dz = player.z - t.z, d = Math.hypot(dx, dz), k = t.r + 0.9;
-    if (d < k && d > 1e-4) { player.x = t.x + dx / d * k; player.z = t.z + dz / d * k; }
-  }
-  for (const b of beacons) {
-    const d = Math.hypot(player.x - b.x, player.z - b.z);
     if (!b.lit) { b.mark.material.opacity = 0.22 + Math.sin(time * 2 + b.phase) * 0.1; continue; }
     const f = 1 + Math.sin(time * 9 + b.phase) * 0.12 + Math.sin(time * 14.3 + b.phase) * 0.07;
     b.flame.scale.set(0.8 * f, 1.25 / f, 0.8 * f); b.glow.material.opacity = 0.7 + 0.15 * f; b.beam.material.opacity = 0.34 + 0.1 * f;
@@ -664,7 +613,7 @@ function movePlayer(dt) {
   for (const t of TREES) push(t.x, t.z, 0.7 * t.s + 0.6);
   if (d > R) for (const t of WOODS) push(t.x, t.z, t.r);
   player.g = hillHeight(player.x, player.z);
-  for (const o of objs) if (o.kind !== 'ball' && o.body.position.y < 2.4 + player.y + player.g && o.body.position.y > player.y + player.g - 0.5) push(o.body.position.x, o.body.position.z, 1.0);
+  for (const o of objs) if (o.kind !== 'ball' && o.body.position.y < 2.4 + player.y && o.body.position.y > player.y - 0.5) push(o.body.position.x, o.body.position.z, 1.0);
 }
 
 const camPos = new THREE.Vector3(), camAt = new THREE.Vector3();
@@ -763,13 +712,13 @@ function frame(now) {
 // Scripted stepping for tests (the preview pane only runs frames while visible).
 window.game = {
   step(seconds = 1, dt = 1 / 60) { window.__manual = true; for (let t = 0; t < seconds; t += dt) step(dt); renderer.render(scene, camera); return this.state(); },
-  fling, jump, setHero, beacons, motes, lightBeacon, terraces, debug: { scene, camera, hero, acts, THROW, THREE, player, sites, renderer, get mixer() { return mixer; } },
+  fling, jump, setHero, beacons, motes, lightBeacon, debug: { scene, camera, hero, acts, THROW, THREE, player, sites, renderer, get mixer() { return mixer; } },
   walk(x, y) { window.__joy = x || y ? { x, y } : null; },
   setLevel(n) { level = n; buildLevel(); },
   setSeason(name) { scenery.setSeason(name); },
   auto() { window.__manual = false; },
   state() {
-    return { heroLoaded, lit: beacons.filter(b => b.lit).length, motes: motes.length, hero: heroIx, g: +player.g.toFixed(2), level, season: scenery.season, detail: +detail.toFixed(2), state, lanterns: lanternsLeft(), extras: lanterns.length - lanternsLeft(), total, objects: objs.length, sites: sites.length,
+    return { heroLoaded, lit: beacons.filter(b => b.lit).length, motes: motes.length, hero: heroIx, g: +player.g.toFixed(2), level, season: scenery.season, detail: +detail.toFixed(2), state, lanterns: lanterns.length, total, objects: objs.length, sites: sites.length,
       x: +player.x.toFixed(2), y: +player.y.toFixed(2), z: +player.z.toFixed(2), clips: { ...CLIP, throw: THROW.clip }, hop: [+HOP.t0.toFixed(2), +HOP.t1.toFixed(2)], mode: heroMode, camYaw: +camYaw.toFixed(2),
       moving: objs.filter(o => o.body.sleepState !== CANNON.Body.SLEEPING).length };
   },
