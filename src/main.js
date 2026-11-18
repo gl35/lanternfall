@@ -32,7 +32,7 @@ window.addEventListener('resize', resize); resize();
 const player = { x: START.x, z: START.z, y: 0, vy: 0, face: 0, moving: 0, walkT: 0 };
 const JUMP_V = 8.2, GRAVITY = 20;
 let camYaw = 0;                                            // 0 looks toward -z; forward = (sin, 0, -cos)
-const SPEED = 6.2, HAND_H = 2.15, HAND_F = 0.9, BALL_R = 0.45;
+const SPEED = 4.8, HAND_H = 2.15, HAND_F = 0.9, BALL_R = 0.45;
 const fwd = (yaw, out) => out.set(Math.sin(yaw), 0, -Math.cos(yaw));
 
 const hero = new THREE.Group(), heroTilt = new THREE.Group();
@@ -41,11 +41,25 @@ let heroKick = 0, heroLoaded = false, heroMode = '', heroAct = null, mixer = nul
 const acts = {};
 const THROW = { clip: 'box_02', wind: 2.0, speed: 1.3, hold: 0.8 };   // which clip is the throw, and where its wind-up sits
 const CLIP = { idle: null, walk: null, jump: null, win: null };       // filled in by name when the model loads
+const HOP = { t0: 0, t1: 1 };                                          // the part of the jump clip that is one take-off-to-landing
+function findHop(clip) {
+  // jump clips often hold several hops; use the hips' height to cut out the highest one, trough to trough
+  const t = clip.tracks.find(t => /Hips.position$/.test(t.name));
+  HOP.t0 = 0; HOP.t1 = clip.duration;
+  if (!t) return;
+  const y = i => t.values[i * 3 + 1], n = t.times.length;
+  let top = 0; for (let i = 1; i < n; i++) if (y(i) > y(top)) top = i;
+  let a = top, b = top;
+  while (a > 0 && y(a - 1) <= y(a)) a--;
+  while (b < n - 1 && y(b + 1) <= y(b)) b++;
+  if (t.times[b] - t.times[a] > 0.15) { HOP.t0 = t.times[a]; HOP.t1 = t.times[b]; }
+}
 function pickClips() {
   const names = Object.keys(acts), find = re => names.find(n => re.test(n)) || null;
   CLIP.idle = find(/idle|breath|stand/i) || find(/look/i) || names[0];
   CLIP.walk = find(/run|jog/i) || find(/walk/i);
-  CLIP.jump = find(/jump|leap/i);
+  CLIP.jump = names.find(n => /^(jump|leap)$/i.test(n)) || find(/jump|leap/i);
+  if (CLIP.jump) findHop(acts[CLIP.jump].getClip());
   CLIP.win = find(/dance|cheer|victory/i);
   const t = find(/throw|cast|pitch/i);
   if (t) Object.assign(THROW, { clip: t, wind: 0, speed: 1.4, hold: Math.min(1.2, acts[t].getClip().duration / 1.4) });
@@ -543,12 +557,12 @@ function step(dtReal) {
       if (mode === 'win') heroPlay(CLIP.win || CLIP.idle, { fade: 0.4 });
       else if (mode === 'aim') heroPlay(THROW.clip, { fade: 0.18, speed: 0, at: THROW.wind });
       else if (mode === 'throw') heroPlay(THROW.clip, { fade: 0.08, speed: THROW.speed, once: true, at: heroMode === 'aim' ? null : THROW.wind });
-      else if (mode === 'jump') heroPlay(CLIP.jump, { fade: 0.1, once: true, at: 0, speed: acts[CLIP.jump].getClip().duration / (2 * JUMP_V / GRAVITY) });
+      else if (mode === 'jump') heroPlay(CLIP.jump, { fade: 0.08, once: true, at: HOP.t0, speed: (HOP.t1 - HOP.t0) / (2 * JUMP_V / GRAVITY) });
       else if (mode === 'walk') heroPlay(CLIP.walk, { fade: 0.2 });
       else heroPlay(CLIP.idle, { fade: 0.35 });
       heroMode = mode;
     }
-    if (mode === 'walk') heroAct.timeScale = 0.5 + player.moving * 0.8;
+    if (mode === 'walk') heroAct.timeScale = 0.6 + player.moving * 1.5;
     mixer.update(dtReal);
   }
 
@@ -582,7 +596,7 @@ window.game = {
   auto() { window.__manual = false; },
   state() {
     return { heroLoaded, level, state, lanterns: lanterns.length, total, objects: objs.length, sites: sites.length,
-      x: +player.x.toFixed(2), y: +player.y.toFixed(2), z: +player.z.toFixed(2), clips: { ...CLIP, throw: THROW.clip }, camYaw: +camYaw.toFixed(2),
+      x: +player.x.toFixed(2), y: +player.y.toFixed(2), z: +player.z.toFixed(2), clips: { ...CLIP, throw: THROW.clip }, hop: [+HOP.t0.toFixed(2), +HOP.t1.toFixed(2)], mode: heroMode, camYaw: +camYaw.toFixed(2),
       moving: objs.filter(o => o.body.sleepState !== CANNON.Body.SLEEPING).length };
   },
 };
