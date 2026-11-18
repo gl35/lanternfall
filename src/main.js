@@ -164,6 +164,59 @@ function haloSprite(scale, opacity, color = 0xffffff) {
   s.scale.setScalar(scale); return s;
 }
 
+// ---------- fire ----------
+// A flame is an upright card that always faces the camera. Its shape is drawn in the shader: a teardrop whose
+// edge and tip are eaten away by noise scrolling upward, so tongues lick up and break off, coloured in
+// a few flat bands from a pale core through yellow and orange to deep red - painted fire, not a glowing ball.
+const FIRE_T = { value: 0 };
+const flameGeo = new THREE.PlaneGeometry(1, 1);
+function flameMaterial(w, h, seed, base = 0, heat = 1) {
+  return new THREE.ShaderMaterial({
+    uniforms: { uTime: FIRE_T, uSize: { value: new THREE.Vector2(w, h) }, uSeed: { value: seed }, uBase: { value: base }, uHeat: { value: heat } },
+    transparent: true, depthWrite: false, side: THREE.DoubleSide,
+    vertexShader: `uniform vec2 uSize; uniform float uBase; varying vec2 vUv;
+      void main() {
+        vUv = uv;
+        vec4 c = modelViewMatrix * vec4(0.0, 0.0, 0.0, 1.0);
+        vec3 up = normalize((viewMatrix * vec4(0.0, 1.0, 0.0, 0.0)).xyz);
+        float sc = length(modelMatrix[0].xyz);                                                   // grows with whatever it sits on
+        c.xyz += (vec3(1.0, 0.0, 0.0) * (uv.x - 0.5) * uSize.x + up * (uv.y - uBase) * uSize.y) * sc;
+        gl_Position = projectionMatrix * c;
+      }`,
+    fragmentShader: `uniform float uTime, uSeed, uHeat; varying vec2 vUv;
+      float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+      float noise(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+        return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), f.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), f.x), f.y); }
+      float fbm(vec2 p) { return noise(p) * 0.6 + noise(p * 2.1 + 7.3) * 0.28 + noise(p * 4.3 + 2.1) * 0.12; }
+      void main() {
+        float y = vUv.y, t = uTime + uSeed * 9.0;
+        float sway = (fbm(vec2(uSeed * 3.0, y * 1.6 - t * 1.3)) - 0.5) * 0.7 * y;              // the whole flame leans and snakes
+        float x = (vUv.x - 0.5) * 2.0 - sway;
+        float w = 0.92 * pow(1.0 - y, 0.75) * (0.5 + 0.5 * smoothstep(0.0, 0.2, y));           // teardrop, pinched at the foot
+        float body = 1.0 - abs(x) / max(w, 0.001);
+        float lick = fbm(vec2(x * 2.6 + uSeed * 5.0, y * 3.4 - t * 2.6));                        // tongues climbing
+        float fine = noise(vec2(x * 7.0, y * 8.0 - t * 4.4));
+        float f = body - (lick * 0.95 + fine * 0.25) * (0.25 + 1.15 * y);
+        f = f * uHeat + (1.0 - y) * 0.28 * step(0.0, body);
+        if (f < 0.05) discard;
+        vec3 col = vec3(0.78, 0.13, 0.04);                                                       // deep red rim
+        col = mix(col, vec3(1.0, 0.36, 0.05), smoothstep(0.10, 0.16, f));                        // orange
+        col = mix(col, vec3(1.0, 0.68, 0.10), smoothstep(0.26, 0.33, f));                        // amber
+        col = mix(col, vec3(1.0, 0.90, 0.38), smoothstep(0.46, 0.54, f));                        // yellow
+        col = mix(col, vec3(1.0, 0.98, 0.84), smoothstep(0.70, 0.80, f));                        // pale core
+        gl_FragColor = vec4(col, smoothstep(0.05, 0.11, f));
+        #include <colorspace_fragment>
+      }`,
+  });
+}
+function flame(w, h, seed, base, heat) {
+  const m = new THREE.Mesh(flameGeo, flameMaterial(w, h, seed, base, heat)); m.frustumCulled = false; m.renderOrder = 3; return m;
+}
+const ballFlameMat = [flameMaterial(3.4, 4.6, 0.3, 0.3, 1.15), flameMaterial(2.3, 3.2, 0.7, 0.3, 1.3)];
+function ballFlames(mesh) {                                  // fire wrapped round a thrown ball: a wide back flame and a hotter inner one
+  for (const mat of ballFlameMat) { const m = new THREE.Mesh(flameGeo, mat); m.frustumCulled = false; m.renderOrder = 3; mesh.add(m); }
+}
+
 // ---------- game objects ----------
 const objs = [];        // { body, mesh, kind }
 const lanterns = [];
@@ -414,7 +467,7 @@ const dots = [];
     m.visible = false; scene.add(m); dots.push(m);
   }
 }
-const charge = new THREE.Mesh(sphereGeo, MAT.ball); charge.add(haloSprite(3.4, 0.4, 0xff8a3a)); charge.visible = false; scene.add(charge);
+const charge = new THREE.Mesh(sphereGeo, MAT.ball); charge.add(haloSprite(3.0, 0.3, 0xff8a3a)); ballFlames(charge); charge.visible = false; scene.add(charge);
 const tmpV = new THREE.Vector3(), tmpF = new THREE.Vector3(), hand = new THREE.Vector3();
 function handPos(yaw, out) { fwd(yaw, tmpF); return out.set(player.x + tmpF.x * HAND_F, HAND_H + player.y + player.g, player.z + tmpF.z * HAND_F); }
 function launchVel(yaw, power, out) {
@@ -444,7 +497,7 @@ function fling(yawRel, power) {
   body.position.set(hand.x, hand.y, hand.z);
   const v = launchVel(yaw, power, tmpV); body.velocity.set(v.x, v.y, v.z);
   body.angularDamping = 0.3; body.linearDamping = 0.02;
-  const mesh = new THREE.Mesh(sphereGeo, MAT.ball); mesh.scale.setScalar(BALL_R); mesh.castShadow = true; mesh.add(haloSprite(3.4, 0.4, 0xff8a3a));
+  const mesh = new THREE.Mesh(sphereGeo, MAT.ball); mesh.scale.setScalar(BALL_R); mesh.castShadow = true; mesh.add(haloSprite(3.0, 0.3, 0xff8a3a)); ballFlames(mesh);
   mesh.position.copy(hand);
   register(body, mesh, 'ball');
   body.addEventListener('collide', e => {
@@ -513,7 +566,6 @@ const elBeacons = document.getElementById('beacons');
 {
   const rng = mulberry(4242), N = 8;
   const pillarGeo = new THREE.CylinderGeometry(0.55, 0.9, 4.4, 14), bowlGeo = new THREE.CylinderGeometry(1.25, 0.6, 0.8, 20), footGeo = new THREE.CylinderGeometry(1.3, 1.5, 0.5, 16);
-  const flameMat = new THREE.MeshBasicMaterial({ color: 0xffb040, toneMapped: false });
   const clear = (x, z, pad) => !WOODS.some(t => Math.hypot(t.x - x, t.z - z) < t.r * 2.2 + pad);
   for (let i = 0; i < N; i++) {
     let best = null;
@@ -527,11 +579,13 @@ const elBeacons = document.getElementById('beacons');
     const bowl = new THREE.Mesh(bowlGeo, MAT.dark); bowl.position.y = 4.9;
     for (const m of [foot, pillar, bowl]) { m.castShadow = m.receiveShadow = true; }
     const mark = haloSprite(5, 0.3); mark.position.y = 5.6;                                   // a pale glint so an unlit one can be spotted from afar
-    const flame = new THREE.Mesh(sphereGeo, flameMat); flame.position.y = 5.9; flame.visible = false;
-    const glow = haloSprite(13, 0.85, 0xffa040); glow.position.y = 6.1; glow.visible = false;
+    const fire = new THREE.Group(); fire.position.y = 5.15; fire.visible = false;                 // three flames of different size and pace, back to front
+    fire.add(flame(3.6, 4.4, rng(), 0, 0.95), flame(2.6, 3.3, rng(), 0, 1.1), flame(1.6, 2.2, rng(), 0, 1.35));
+    const flameRef = fire;
+    const glow = haloSprite(8, 0.45, 0xffa040); glow.position.y = 6.4; glow.visible = false;
     const beam = haloSprite(1, 0.5, 0xffc060); beam.scale.set(7, 150, 1); beam.position.y = 62; beam.visible = false;   // a column of light, seen across the hills
-    g.add(foot, pillar, bowl, mark, flame, glow, beam); scene.add(g);
-    beacons.push({ x, z, h, lit: false, mark, flame, glow, beam, phase: rng() * 6 });
+    g.add(foot, pillar, bowl, mark, glow, beam, fire); scene.add(g);
+    beacons.push({ x, z, h, lit: false, mark, flame: flameRef, glow, beam, phase: rng() * 6 });
     const dot = document.createElement('i'); elBeacons.appendChild(dot);
     // the trail
     const dist = Math.hypot(x, z), ux = x / dist, uz = z / dist;
@@ -570,8 +624,8 @@ function updateHills(dt) {
     if (d < 1.9 && d > 1e-4) { player.x = b.x + dx / d * 1.9; player.z = b.z + dz / d * 1.9; }
     if (!b.lit) { b.mark.material.opacity = 0.22 + Math.sin(time * 2 + b.phase) * 0.1; continue; }
     const f = 1 + Math.sin(time * 9 + b.phase) * 0.12 + Math.sin(time * 14.3 + b.phase) * 0.07;
-    b.flame.scale.set(0.8 * f, 1.25 / f, 0.8 * f); b.glow.material.opacity = 0.7 + 0.15 * f; b.beam.material.opacity = 0.34 + 0.1 * f;
-    if (d < 70 && Math.random() < dt * 14) spawn(b.x + rnd(0.6), b.h + 6.2, b.z + rnd(0.6), rnd(0.6), 1.6 + Math.random() * 1.6, rnd(0.6), 0.7 + Math.random() * 0.6, 0.8,
+    b.glow.material.opacity = 0.3 + 0.14 * f; b.beam.material.opacity = 0.34 + 0.1 * f;
+    if (d < 70 && Math.random() < dt * 9) spawn(b.x + rnd(0.7), b.h + 7 + Math.random() * 2, b.z + rnd(0.7), rnd(0.9), 2.2 + Math.random() * 2.2, rnd(0.9), 0.8 + Math.random() * 0.8, 0.22,
       { color: Math.random() < 0.5 ? 0xff6a1a : 0xffc050, grow: -0.5, alpha: 0.85 });
   }
 }
@@ -644,6 +698,7 @@ function step(dtReal) {
   time += dt; stateT += dtReal; cooldown -= dt;
   if ((comboT -= dt) <= 0) combo = 0;
 
+  FIRE_T.value = time;
   movePlayer(dt);
   updateHills(dt);
   physics(dt);
