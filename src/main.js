@@ -276,6 +276,8 @@ function gate(cx, cz, yaw) {
   const [x, z] = place(cx, cz, yaw, 0.85, 0); addLantern(x, 3 * S + 0.22, z);
 }
 
+const forcedSeason = new URLSearchParams(location.search).get('season');
+const seasonFor = l => forcedSeason || (l % 2 === 0 ? 'winter' : 'summer');   // the seasons take turns, level by level
 let level = Math.max(1, parseInt(localStorage.getItem('lanternfall.level') || '1', 10) || 1);
 let state = 'play', stateT = 0, combo = 0, comboT = 0, total = 0, cooldown = 0, camReady = false;
 const sites = [];
@@ -304,6 +306,7 @@ function buildLevel() {
     else gate(s.x, s.z, yaw);
   });
   total = lanterns.length;
+  scenery.setSeason(seasonFor(level));
   player.x = START.x; player.z = START.z; player.face = 0; camYaw = 0; camReady = false;
   state = 'play'; stateT = 0; combo = 0; cooldown = 0;
   hud();
@@ -575,7 +578,7 @@ function step(dtReal) {
   }
   for (const l of lanterns) l.glow.material.opacity = 0.62 + Math.sin(time * 2.2 + l.phase) * 0.14;
   updateParts(dt, time);
-  scenery.update(time, player.x, player.z);
+  scenery.update(time, player.x, player.z, camera, renderer.getPixelRatio());
   updateCamera(dtReal);
 }
 
@@ -590,12 +593,13 @@ function frame(now) {
 // Scripted stepping for tests (the preview pane only runs frames while visible).
 window.game = {
   step(seconds = 1, dt = 1 / 60) { window.__manual = true; for (let t = 0; t < seconds; t += dt) step(dt); renderer.render(scene, camera); return this.state(); },
-  fling, jump, debug: { camera, hero, acts, THROW, THREE, player, sites, renderer, get mixer() { return mixer; } },
+  fling, jump, debug: { scene, camera, hero, acts, THROW, THREE, player, sites, renderer, get mixer() { return mixer; } },
   walk(x, y) { window.__joy = x || y ? { x, y } : null; },
   setLevel(n) { level = n; buildLevel(); },
+  setSeason(name) { scenery.setSeason(name); },
   auto() { window.__manual = false; },
   state() {
-    return { heroLoaded, level, state, lanterns: lanterns.length, total, objects: objs.length, sites: sites.length,
+    return { heroLoaded, level, season: scenery.season, state, lanterns: lanterns.length, total, objects: objs.length, sites: sites.length,
       x: +player.x.toFixed(2), y: +player.y.toFixed(2), z: +player.z.toFixed(2), clips: { ...CLIP, throw: THROW.clip }, hop: [+HOP.t0.toFixed(2), +HOP.t1.toFixed(2)], mode: heroMode, camYaw: +camYaw.toFixed(2),
       moving: objs.filter(o => o.body.sleepState !== CANNON.Body.SLEEPING).length };
   },
