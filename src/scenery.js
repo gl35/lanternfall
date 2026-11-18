@@ -12,7 +12,7 @@ const SEASONS = {
   summer: {
     sun: [-0.35, 0.62, -0.7], sunColor: 0xfff1d6, sunPower: 3.4, hemi: [0xbfe0ff, 0x6f9a4a, 1.45], fill: 0.5,
     sky: [0x1a5ccc, 0x4f9eea, 0xc3e4fb, 0xfff2c0, 1], fog: [0xcfe8fb, 70, 430],
-    cloud: [0xffffff, 0x8fa8c8], floor: 0xdcecf8, ground: 0xffffff, rock: 0xa9a39a, trunk: 0x6d4a34, snow: 0,
+    cloud: [0xffffff, 0x8fa8c8], floor: 0xdcecf8, ground: 0xffffff, rock: 0xa9a39a, trunk: 0xb89068, snow: 0,
   },
   winter: {
     sun: [-0.3, 0.75, -0.45], sunColor: 0xdfe4ea, sunPower: 0.9, hemi: [0xe8ecf2, 0xb4b8c0, 2.0], fill: 0.25,
@@ -182,13 +182,15 @@ function meadow(r) {
 // looks covered while only nearby blades are drawn. Two layers: fine dense blades close up, and broader
 // tufts out to the distance. Gusts roll across as travelling waves: every blade leans the same way by
 // (gust strength x height squared), and its tip brightens as it bends.
-const GRASS_NEAR = { tile: 20, count: 80000, segs: 2, fadeIn: null, fadeOut: [7, 10], spread: [1, 0.7], h: [0.5, 0.3, 0.32],
-  blades: [[0.06, 1, 0.2, 0, 0], [0.055, 0.8, 2.3, 0.05, 0.03], [0.055, 0.9, 4.4, -0.04, 0.05]] };
-const GRASS_FAR = { tile: 66, count: 62000, segs: 1, fadeIn: [6, 9], fadeOut: [26, 33], spread: [1.2, 0.8], h: [0.55, 0.3, 0.34],
-  blades: [[0.2, 1, 0.2, 0, 0], [0.18, 0.8, 2.3, 0.14, 0.08], [0.18, 0.9, 4.4, -0.1, 0.12]] };
+// The two layers cross-fade over several metres, and the far blades start as thin as the near ones and only
+// broaden with distance, so there is no visible ring where one hands over to the other.
+const GRASS_NEAR = { tile: 28, count: 118000, fadeIn: null, fadeOut: [8, 14], widen: false, spread: [1, 0.7], h: [0.5, 0.3, 0.32],
+  blades: [[0.06, 1, 0.2, 0, 0, 2], [0.055, 0.8, 2.3, 0.05, 0.03, 1], [0.055, 0.9, 4.4, -0.04, 0.05, 1]] };
+const GRASS_FAR = { tile: 66, count: 100000, fadeIn: [7, 13], fadeOut: [26, 33], widen: true, spread: [1, 0.7], h: [0.52, 0.3, 0.33],
+  blades: [[0.075, 1, 0.2, 0, 0, 1], [0.07, 0.8, 2.3, 0.07, 0.04, 1], [0.07, 0.9, 4.4, -0.05, 0.06, 1]] };
 function grassField(r, U, o) {
-  const blade = (w, h, yaw, ox, oz) => {
-    const g = new THREE.PlaneGeometry(w, h, 1, o.segs); g.translate(0, h / 2, 0);
+  const blade = (w, h, yaw, ox, oz, segs) => {
+    const g = new THREE.PlaneGeometry(w, h, 1, segs); g.translate(0, h / 2, 0);
     const p = g.attributes.position;
     for (let i = 0; i < p.count; i++) { const y = p.getY(i) / h; p.setX(i, p.getX(i) * (1 - y * 0.92)); p.setZ(i, y * y * 0.12 * h); }
     g.rotateY(yaw); g.translate(ox, 0, oz); return g;
@@ -232,6 +234,7 @@ function grassField(r, U, o) {
         float flutter = sin(uTime * 4.3 + wp.x * 2.1 - wp.y * 1.7) * 0.07;
         bend = (0.1 + gust * 0.62 + flutter) * mix(1.0, 1.5, uSnow);
         transformed.y *= mix(1.0, 0.5, uSnow);
+        ${o.widen ? 'transformed.xz *= mix(1.0, 2.6, smoothstep(11.0, 30.0, dC));' : ''}
         transformed *= keep;
         float patchTone = sin(wp.x * 0.31 + sin(wp.y * 0.23) * 1.7) * sin(wp.y * 0.27 - wp.x * 0.11);
         vColor.rgb *= vec3(1.0 + patchTone * 0.10, 1.0 + patchTone * 0.04, 1.0 - patchTone * 0.12);   // drifts of yellower and bluer green
@@ -263,37 +266,74 @@ function grassField(r, U, o) {
   return m;
 }
 
-// Leaves: thousands of small flat leaves on the surface of every tree's crown, each catching the light
-// at its own angle and fluttering in the wind.
+// A painted sprig: a stem with leaves down both sides, each with a midrib and side veins. Drawn pale so the
+// per-sprig tint decides the final green; everything outside the leaves is transparent.
+function sprigTexture() {
+  const S = 256, c = document.createElement('canvas'); c.width = c.height = S;
+  const g = c.getContext('2d');
+  g.translate(S / 2, S * 0.97);
+  g.strokeStyle = 'rgb(150,170,110)'; g.lineWidth = 5; g.lineCap = 'round';
+  g.beginPath(); g.moveTo(0, 0); g.quadraticCurveTo(6, -S * 0.3, 0, -S * 0.56); g.stroke();
+  const leaf = (y, ang, len) => {
+    const wid = len * 0.33;
+    g.save(); g.translate(0, y); g.rotate(ang);
+    const gr = g.createLinearGradient(-wid, 0, wid, -len);
+    gr.addColorStop(0, 'rgb(150,196,128)'); gr.addColorStop(0.55, 'rgb(198,232,160)'); gr.addColorStop(1, 'rgb(236,252,196)');
+    g.fillStyle = gr; g.beginPath(); g.moveTo(0, 0);
+    g.bezierCurveTo(wid, -len * 0.2, wid * 0.95, -len * 0.7, 0, -len);
+    g.bezierCurveTo(-wid * 0.95, -len * 0.7, -wid, -len * 0.2, 0, 0); g.fill();
+    g.strokeStyle = 'rgba(120,170,104,0.9)'; g.lineWidth = 1.5; g.stroke();                       // darker rim
+    g.strokeStyle = 'rgba(246,255,220,0.95)'; g.lineWidth = 2.2;
+    g.beginPath(); g.moveTo(0, -2); g.lineTo(0, -len * 0.93); g.stroke();                         // midrib
+    g.lineWidth = 1;
+    for (let k = 1; k <= 4; k++) {
+      const yy = -len * k / 5.2, w = wid * (0.75 - Math.abs(k - 2.2) * 0.12);
+      g.beginPath(); g.moveTo(0, yy); g.lineTo(w, yy - len * 0.11); g.moveTo(0, yy); g.lineTo(-w, yy - len * 0.11); g.stroke();
+    }
+    g.restore();
+  };
+  for (let i = 0; i < 7; i++) {
+    const t = i / 6;
+    leaf(-S * 0.06 - S * 0.46 * t, (i % 2 ? 1 : -1) * (1.0 - t * 0.5), S * (0.37 - t * 0.09));
+  }
+  leaf(-S * 0.54, 0.05, S * 0.3);                                                                 // the leaf at the tip
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4; return t;
+}
+
+// Foliage: every crown is covered in sprigs that grow outward from its surface, so the edge of a tree is
+// made of real leaf shapes. Each sprig is tinted by how much sun its spot gets, and sways in the wind.
 function leafCloud(r, U, trees) {
-  const geo = new THREE.CircleGeometry(0.11, 4); geo.scale(2.0, 1, 1);     // a pointed leaf
-  const mat = new THREE.MeshLambertMaterial({ side: THREE.DoubleSide });
+  const geo = new THREE.PlaneGeometry(1, 1); geo.translate(0, 0.5, 0);
+  const nrm = geo.attributes.normal; for (let i = 0; i < nrm.count; i++) nrm.setXYZ(i, 0, 1, 0);   // lit as the crown surface it grows from
+  const mat = new THREE.MeshLambertMaterial({ map: sprigTexture(), alphaTest: 0.45, side: THREE.DoubleSide });
   mat.customProgramCacheKey = () => 'leaves';
   mat.onBeforeCompile = s => {
     s.uniforms.uTime = U.time;
     s.vertexShader = 'uniform float uTime;\n' + s.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>
       vec3 lp = instanceMatrix[3].xyz;
-      float fl = sin(uTime * 3.1 + lp.x * 1.7 + lp.z * 1.3 + lp.y) * 0.5 + sin(uTime * 1.3 + lp.x * 0.3) * 0.5;
-      transformed.z += fl * 0.07 * (abs(position.x) + 0.1);`)
-      // light every leaf partly as if it faced the sky, so the shaded side of a crown stays green instead of going black
+      float fl = sin(uTime * 2.6 + lp.x * 1.7 + lp.z * 1.3 + lp.y) * 0.6 + sin(uTime * 1.1 + lp.x * 0.3) * 0.4;
+      transformed.z += fl * 0.10 * position.y;
+      transformed.x += fl * 0.05 * position.y;`)
+      // light every sprig partly as if it faced the sky, so the shaded side of a crown stays green instead of going black
       .replace('#include <defaultnormal_vertex>', `#include <defaultnormal_vertex>
-      transformedNormal = normalize(mix(transformedNormal, normalMatrix * vec3(0.0, 1.0, 0.0), 0.55));`);
+      transformedNormal = normalize(mix(transformedNormal, normalMatrix * vec3(0.0, 1.0, 0.0), 0.5));`);
   };
-  const PER = 280, total = trees.reduce((n, t) => n + t.userData.puffs.length * PER, 0);
-  const m = new THREE.InstancedMesh(geo, mat, total), d = new THREE.Object3D(), c = new THREE.Color(), n = new THREE.Vector3(), p = new THREE.Vector3();
-  const lo = new THREE.Color(0x1f8236), mid = new THREE.Color(0x5cc044), hi = new THREE.Color(0xf2ff86), zAxis = new THREE.Vector3(0, 0, 1);
+  const PER = 210, total = trees.reduce((n, t) => n + t.userData.puffs.length * PER, 0);
+  const m = new THREE.InstancedMesh(geo, mat, total), d = new THREE.Object3D(), c = new THREE.Color();
+  const n = new THREE.Vector3(), out = new THREE.Vector3(), p = new THREE.Vector3(), yAxis = new THREE.Vector3(0, 1, 0);
+  const lo = new THREE.Color(0x2a8a3a), mid = new THREE.Color(0x6fd04c), hi = new THREE.Color(0xf6ff96);
   let k = 0;
   for (const t of trees) {
     t.updateMatrixWorld(true);
     const sc = t.scale.x;
     for (const [x, y, z, s] of t.userData.puffs) for (let i = 0; i < PER; i++, k++) {
-      const u = r() * 2 - 0.55, a = r() * 6.283, cu = Math.min(1, Math.max(-1, u)), q = Math.sqrt(1 - cu * cu);   // biased to the upper side
+      const u = r() * 2 - 0.8, a = r() * 6.283, cu = Math.min(1, Math.max(-1, u)), q = Math.sqrt(1 - cu * cu);   // more on top, some underneath
       n.set(Math.cos(a) * q, cu, Math.sin(a) * q);
-      p.set(x + n.x * s * 1.04, y + n.y * s * 0.84, z + n.z * s * 1.04).applyMatrix4(t.matrixWorld);
+      p.set(x + n.x * s * 0.86, y + n.y * s * 0.7, z + n.z * s * 0.86).applyMatrix4(t.matrixWorld);
+      out.copy(n).add(new THREE.Vector3(r() - 0.5, r() - 0.3, r() - 0.5).multiplyScalar(1.1)).normalize().transformDirection(t.matrixWorld);
+      d.position.copy(p); d.quaternion.setFromUnitVectors(yAxis, out); d.rotateY(r() * 6.283);
+      const size = sc * (0.5 + r() * 0.45); d.scale.set(size, size, size); d.updateMatrix(); m.setMatrixAt(k, d.matrix);
       n.transformDirection(t.matrixWorld);
-      d.position.copy(p); d.quaternion.setFromUnitVectors(zAxis, n);
-      d.rotateZ(r() * 6.283); d.rotateX((r() - 0.5) * 0.7); d.rotateY((r() - 0.5) * 0.7);
-      d.scale.setScalar(sc * (0.42 + r() * 0.42)); d.updateMatrix(); m.setMatrixAt(k, d.matrix);
       const lit = THREE.MathUtils.clamp(n.y * 0.5 + 0.38 + n.dot(SUN_DIR) * 0.22 + (y - 3.9) * 0.14 + (r() - 0.5) * 0.3, 0, 1);
       if (lit < 0.5) c.copy(lo).lerp(mid, lit * 2); else c.copy(mid).lerp(hi, (lit - 0.5) * 2);
       m.setColorAt(k, c);
@@ -301,6 +341,28 @@ function leafCloud(r, U, trees) {
   }
   m.castShadow = false; m.receiveShadow = true; m.frustumCulled = false; m.userData.full = total;
   return m;
+}
+
+// Bark: furrows running up the trunk, used both as colour and as surface relief.
+function barkTexture(r) {
+  const W = 256, H = 512, c = document.createElement('canvas'); c.width = W; c.height = H;
+  const g = c.getContext('2d'); g.fillStyle = '#b9a48e'; g.fillRect(0, 0, W, H);
+  for (let i = 0; i < 150; i++) {
+    const x = r() * W, dark = r() < 0.6;
+    g.strokeStyle = dark ? 'rgba(40,24,14,0.5)' : 'rgba(238,222,196,0.4)'; g.lineWidth = dark ? 2 + r() * 5 : 1 + r() * 3;
+    let y = r() * H, px = x; const len = 60 + r() * 220;
+    for (const ox of [0, W, -W]) {
+      g.beginPath(); g.moveTo(px + ox, y); let yy = y, xx = px;
+      for (let k = 0; k < 6; k++) { yy += len / 6; xx += (r() - 0.5) * 12; g.lineTo(xx + ox, yy); }
+      g.stroke();
+    }
+  }
+  for (let i = 0; i < 9; i++) {                                                                    // knots
+    const x = r() * W, y = r() * H, rad = 6 + r() * 9;
+    g.strokeStyle = 'rgba(40,24,14,0.6)'; g.lineWidth = 2.5; g.beginPath(); g.ellipse(x, y, rad, rad * 1.5, 0, 0, 7); g.stroke();
+  }
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 4;
+  return t;
 }
 
 function flowers(r) {
@@ -379,7 +441,8 @@ function tree(r, bareGeo) {
     p.setX(i, c.x + (p.getX(i) - c.x) * k); p.setZ(i, c.z + (p.getZ(i) - c.z) * k);
   }
   tg.computeVertexNormals();
-  const trunk = new THREE.Mesh(tg, trunkMat); trunk.castShadow = true; g.add(trunk);
+  const uv = tg.attributes.uv; for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getY(i), uv.getX(i) * 1.6);
+  const trunk = new THREE.Mesh(tg, trunkMat); trunk.castShadow = trunk.receiveShadow = true; g.add(trunk);
 
   const leaves = new THREE.Group(), pal = LEAF[Math.floor(r() * LEAF.length)];
   // a broad, slightly flattened crown
@@ -435,6 +498,8 @@ function specks(r, U, { N, fall, wind, size, tint, alpha }) {
 
 export function buildScenery(scene) {
   const r = rng(20261117);
+  const bark = barkTexture(rng(5)); bark.repeat.set(3, 1);
+  trunkMat.map = bark; trunkMat.bumpMap = bark; trunkMat.bumpScale = 2.5; trunkMat.needsUpdate = true;
   const U = { time: { value: 0 }, center: { value: new THREE.Vector2(START.x, START.z) }, snow: { value: 0 } };
   const skyMesh = sky(); scene.add(skyMesh);
   const sea = cloudSea(r); scene.add(sea.group);
