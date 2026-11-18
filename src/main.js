@@ -102,7 +102,7 @@ world.defaultContactMaterial.contactEquationRelaxation = 4;
 function addStatic(shape, x, y, z) {
   const b = new CANNON.Body({ type: CANNON.Body.STATIC, shape }); b.position.set(x, y, z); world.addBody(b); return b;
 }
-addStatic(new CANNON.Cylinder(R - 0.2, R - 0.2, 2, 40), 0, -1, 0);                         // island top
+addStatic(new CANNON.Cylinder(R + 26, R + 26, 2, 48), 0, -1, 0);                           // the meadow floor, a little past where he can walk
 for (const t of TREES) addStatic(new CANNON.Box(new CANNON.Vec3(0.42 * t.s, 2.2 * t.s, 0.42 * t.s)), t.x, 2.2 * t.s, t.z);
 
 // ---------- materials ----------
