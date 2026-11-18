@@ -29,7 +29,8 @@ function resize() {
 window.addEventListener('resize', resize); resize();
 
 // ---------- player ----------
-const player = { x: START.x, z: START.z, face: 0, moving: 0, walkT: 0 };
+const player = { x: START.x, z: START.z, y: 0, vy: 0, face: 0, moving: 0, walkT: 0 };
+const JUMP_V = 8.2, GRAVITY = 20;
 let camYaw = 0;                                            // 0 looks toward -z; forward = (sin, 0, -cos)
 const SPEED = 6.2, HAND_H = 2.15, HAND_F = 0.9, BALL_R = 0.45;
 const fwd = (yaw, out) => out.set(Math.sin(yaw), 0, -Math.cos(yaw));
@@ -39,6 +40,16 @@ hero.add(heroTilt); scene.add(hero);
 let heroKick = 0, heroLoaded = false, heroMode = '', heroAct = null, mixer = null;
 const acts = {};
 const THROW = { clip: 'box_02', wind: 2.0, speed: 1.3, hold: 0.8 };   // which clip is the throw, and where its wind-up sits
+const CLIP = { idle: null, walk: null, jump: null, win: null };       // filled in by name when the model loads
+function pickClips() {
+  const names = Object.keys(acts), find = re => names.find(n => re.test(n)) || null;
+  CLIP.idle = find(/idle|breath|stand/i) || find(/look/i) || names[0];
+  CLIP.walk = find(/run|jog/i) || find(/walk/i);
+  CLIP.jump = find(/jump|leap/i);
+  CLIP.win = find(/dance|cheer|victory/i);
+  const t = find(/throw|cast|pitch/i);
+  if (t) Object.assign(THROW, { clip: t, wind: 0, speed: 1.4, hold: Math.min(1.2, acts[t].getClip().duration / 1.4) });
+}
 new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).load(import.meta.env.BASE_URL + 'models/general-animated.glb', g => {
   g.scene.scale.setScalar(2.5); g.scene.rotation.y = Math.PI;      // model faces +z; turn it to face "forward"
   g.scene.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } if (o.isSkinnedMesh) o.frustumCulled = false; });
@@ -50,7 +61,7 @@ new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).load(import.meta.env.BASE_URL
     }
     acts[c.name] = mixer.clipAction(c);
   }
-  heroTilt.add(g.scene); heroLoaded = true;
+  pickClips(); heroTilt.add(g.scene); heroLoaded = true;
 }, undefined, e => console.error('character model failed to load', e));
 function heroPlay(name, { fade = 0.25, once = false, speed = 1, at = null } = {}) {
   const a = acts[name]; if (!a) return;
@@ -324,7 +335,7 @@ window.addEventListener('pointerdown', e => {
   if (joy.id === null && e.pointerType !== 'mouse' && inJoyZone(e.clientX, e.clientY)) {
     joy.id = e.pointerId; joy.sx = e.clientX; joy.sy = e.clientY; joy.x = joy.y = 0; joyShow(true);
   } else if (aim.id === null) {
-    aim.id = e.pointerId; aim.on = true; aim.sx = e.clientX; aim.sy = e.clientY; aim.valid = false; aim.power = 0;
+    aim.id = e.pointerId; aim.on = true; aim.sx = e.clientX; aim.sy = e.clientY; aim.valid = false; aim.power = 0; aim.t0 = performance.now();
   }
 });
 window.addEventListener('pointermove', e => {
@@ -337,14 +348,18 @@ window.addEventListener('pointermove', e => {
 function release(e, cancel) {
   if (e.pointerId === joy.id) { joy.id = null; joy.x = joy.y = 0; joyShow(false); }
   else if (e.pointerId === aim.id) {
-    if (!cancel) { aimFrom(e.clientX, e.clientY); if (aim.valid) fling(aim.yaw, aim.power); }
+    if (!cancel) {
+      aimFrom(e.clientX, e.clientY);
+      if (aim.valid) fling(aim.yaw, aim.power);
+      else if (Math.hypot(e.clientX - aim.sx, e.clientY - aim.sy) < 14 && performance.now() - aim.t0 < 350) jump();
+    }
     aim.id = null; aim.on = false;
   }
 }
 window.addEventListener('pointerup', e => release(e, false));
 window.addEventListener('pointercancel', e => release(e, true));
 window.addEventListener('contextmenu', e => e.preventDefault());
-window.addEventListener('keydown', e => keys.add(e.code));
+window.addEventListener('keydown', e => { keys.add(e.code); if (e.code === 'Space') { e.preventDefault(); jump(); } });
 window.addEventListener('keyup', e => keys.delete(e.code));
 window.addEventListener('blur', () => keys.clear());
 
@@ -359,7 +374,7 @@ const dots = [];
 }
 const charge = new THREE.Mesh(sphereGeo, MAT.ball); charge.add(haloSprite(3.4, 0.4, 0xff8a3a)); charge.visible = false; scene.add(charge);
 const tmpV = new THREE.Vector3(), tmpF = new THREE.Vector3(), hand = new THREE.Vector3();
-function handPos(yaw, out) { fwd(yaw, tmpF); return out.set(player.x + tmpF.x * HAND_F, HAND_H, player.z + tmpF.z * HAND_F); }
+function handPos(yaw, out) { fwd(yaw, tmpF); return out.set(player.x + tmpF.x * HAND_F, HAND_H + player.y, player.z + tmpF.z * HAND_F); }
 function launchVel(yaw, power, out) {
   const speed = 8 + 18 * power, el = 0.08 + 0.12 * power;    // more pull throws harder and a little higher, so it goes farther
   return out.set(Math.sin(yaw) * Math.cos(el) * speed, Math.sin(el) * speed, -Math.cos(yaw) * Math.cos(el) * speed);
@@ -440,7 +455,16 @@ function physics(dt) {
   for (const o of objs) { o.mesh.position.copy(o.body.position); o.mesh.quaternion.copy(o.body.quaternion); }
 }
 
+function jump() {
+  if (state !== 'play' || player.y > 0.01) return false;
+  player.vy = JUMP_V; player.y = 0.011; sfx.whoosh(0.1);
+  return true;
+}
 function movePlayer(dt) {
+  if (player.y > 0 || player.vy > 0) {
+    player.vy -= GRAVITY * dt; player.y += player.vy * dt;
+    if (player.y <= 0) { player.y = 0; player.vy = 0; dust(player.x, 0.15, player.z, 3); sfx.thump(0.25); }
+  }
   let jx = joy.x, jy = joy.y;
   if (keys.has('KeyA') || keys.has('ArrowLeft')) jx -= 1;
   if (keys.has('KeyD') || keys.has('ArrowRight')) jx += 1;
@@ -466,7 +490,7 @@ function movePlayer(dt) {
     if (dd < rad && dd > 1e-4) { player.x = ox + dx / dd * rad; player.z = oz + dz / dd * rad; }
   };
   for (const t of TREES) push(t.x, t.z, 0.7 * t.s + 0.6);
-  for (const o of objs) if (o.kind !== 'ball' && o.body.position.y < 2.4 && o.body.position.y > -0.5) push(o.body.position.x, o.body.position.z, 1.0);
+  for (const o of objs) if (o.kind !== 'ball' && o.body.position.y < 2.4 + player.y && o.body.position.y > player.y - 0.5) push(o.body.position.x, o.body.position.z, 1.0);
 }
 
 const camPos = new THREE.Vector3(), camAt = new THREE.Vector3();
@@ -479,8 +503,8 @@ function updateCamera(dtReal) {
   const blocked = (d, k) => TREES.some(t => Math.hypot(player.x - tmpF.x * d - t.x, player.z - tmpF.z * d - t.z) < k * t.s);
   while (D > 3 && blocked(D, 3.7)) D -= 0.5;
   if (D <= 3) { H = 2.3; D = D0 * 0.75; while (D > 1.6 && blocked(D, 1.2)) D -= 0.4; }
-  camPos.set(player.x - tmpF.x * D, H, player.z - tmpF.z * D);
-  camAt.set(player.x + tmpF.x * 7, 1.7, player.z + tmpF.z * 7);
+  camPos.set(player.x - tmpF.x * D, H + player.y * 0.5, player.z - tmpF.z * D);
+  camAt.set(player.x + tmpF.x * 7, 1.7 + player.y * 0.5, player.z + tmpF.z * 7);
   const k = camReady ? Math.min(1, dtReal * 7) : 1; camReady = true;
   camera.position.lerp(camPos, k);
   shake = Math.max(0, shake - dtReal * 1.6);
@@ -508,18 +532,23 @@ function step(dtReal) {
   let dy = -player.face - hero.rotation.y; dy = Math.atan2(Math.sin(dy), Math.cos(dy));
   hero.rotation.y += dy * Math.min(1, dtReal * 12);
   const bob = player.moving, stride = Math.sin(player.walkT);
-  hero.position.set(player.x, Math.abs(stride) * 0.09 * bob, player.z);
-  heroTilt.rotation.set(-0.16 * bob, 0, stride * 0.05 * bob);  // no walk clip yet: lean and bob while moving
+  const air = player.y > 0, fake = CLIP.walk ? 0 : bob;      // with no walk clip he leans and bobs instead
+  hero.position.set(player.x, player.y + (air ? 0 : Math.abs(stride) * 0.09 * fake), player.z);
+  const tuck = air && !CLIP.jump ? THREE.MathUtils.clamp(player.vy / JUMP_V, -1, 1) * -0.22 : 0;
+  heroTilt.rotation.set(-0.16 * fake + tuck, 0, stride * 0.05 * fake);
   if (heroLoaded) {
     heroKick = Math.max(0, heroKick - dtReal / THROW.hold);
-    const mode = state === 'won' ? 'win' : heroKick > 0 ? 'throw' : aiming ? 'aim' : 'idle';
+    const mode = state === 'won' ? 'win' : heroKick > 0 ? 'throw' : aiming ? 'aim' : air && CLIP.jump ? 'jump' : player.moving > 0.25 && CLIP.walk ? 'walk' : 'idle';
     if (mode !== heroMode) {
-      if (mode === 'win') heroPlay('dance_01', { fade: 0.4 });
+      if (mode === 'win') heroPlay(CLIP.win || CLIP.idle, { fade: 0.4 });
       else if (mode === 'aim') heroPlay(THROW.clip, { fade: 0.18, speed: 0, at: THROW.wind });
       else if (mode === 'throw') heroPlay(THROW.clip, { fade: 0.08, speed: THROW.speed, once: true, at: heroMode === 'aim' ? null : THROW.wind });
-      else heroPlay('look_around', { fade: 0.35 });
+      else if (mode === 'jump') heroPlay(CLIP.jump, { fade: 0.1, once: true, at: 0, speed: acts[CLIP.jump].getClip().duration / (2 * JUMP_V / GRAVITY) });
+      else if (mode === 'walk') heroPlay(CLIP.walk, { fade: 0.2 });
+      else heroPlay(CLIP.idle, { fade: 0.35 });
       heroMode = mode;
     }
+    if (mode === 'walk') heroAct.timeScale = 0.5 + player.moving * 0.8;
     mixer.update(dtReal);
   }
 
@@ -547,13 +576,13 @@ function frame(now) {
 // Scripted stepping for tests (the preview pane only runs frames while visible).
 window.game = {
   step(seconds = 1, dt = 1 / 60) { window.__manual = true; for (let t = 0; t < seconds; t += dt) step(dt); renderer.render(scene, camera); return this.state(); },
-  fling, debug: { camera, hero, acts, THROW, THREE, player, sites, renderer, get mixer() { return mixer; } },
+  fling, jump, debug: { camera, hero, acts, THROW, THREE, player, sites, renderer, get mixer() { return mixer; } },
   walk(x, y) { window.__joy = x || y ? { x, y } : null; },
   setLevel(n) { level = n; buildLevel(); },
   auto() { window.__manual = false; },
   state() {
     return { heroLoaded, level, state, lanterns: lanterns.length, total, objects: objs.length, sites: sites.length,
-      x: +player.x.toFixed(2), z: +player.z.toFixed(2), camYaw: +camYaw.toFixed(2),
+      x: +player.x.toFixed(2), y: +player.y.toFixed(2), z: +player.z.toFixed(2), clips: { ...CLIP, throw: THROW.clip }, camYaw: +camYaw.toFixed(2),
       moving: objs.filter(o => o.body.sleepState !== CANNON.Body.SLEEPING).length };
   },
 };
