@@ -29,6 +29,8 @@ function rng(seed) {
 }
 
 // Tree positions are fixed, and exported so the game can add trunk colliders and keep towers clear of them.
+export const ROAM = 178;      // how far from the middle he can walk: over the hills, up to the foot of the mountains
+export const WOODS = [];      // the hill trees, for the game to keep him out of
 export const TREES = (() => {
   const r = rng(77), out = [];
   for (let tries = 0; out.length < 18 && tries < 400; tries++) {
@@ -105,6 +107,7 @@ function hillWoods(r, U) {
   for (let i = 0; i < N; i++) {
     if (i % 9 === 0) { const a = r() * 6.283, rad = 105 + Math.pow(r(), 1.3) * 230; cx = Math.cos(a) * rad; cz = Math.sin(a) * rad; }   // copses
     const x = cx + (r() - 0.5) * 30, z = cz + (r() - 0.5) * 30, sc = 2.2 + r() * 2.6, ground = hillHeight(x, z), stem = sc * (0.45 + r() * 0.25), cy = ground + stem + sc * 0.55;
+    WOODS.push({ x, z, r: sc * 0.5 });
     d.rotation.set(0, 0, 0);
     d.position.set(x, ground + stem / 2, z); d.scale.set(sc * 0.7, stem + sc * 0.3, sc * 0.7); d.updateMatrix(); trunks.setMatrixAt(i, d.matrix);
     d.position.set(x, cy, z); d.scale.set(sc * 0.66, sc * 0.5, sc * 0.66); d.updateMatrix(); cores.setMatrixAt(i, d.matrix);
@@ -332,7 +335,7 @@ function grassField(r, U, o) {
         float dC = distance(wp, uCenter);
         float hsh = fract(sin(dot(ip.xz, vec2(12.9898, 78.233))) * 43758.5453);
         float ramp = smoothstep(${f(o.range[0])}, ${f(o.range[1])}, dC);
-        float keep = ${o.mode === 'near' ? 'clamp((1.0 - ramp - hsh) * 5.0, 0.0, 1.0)' : `clamp((ramp - hsh) * 5.0, 0.0, 1.0) * (1.0 - smoothstep(${f(o.fadeOut[0])}, ${f(o.fadeOut[1])}, dC))`} * step(length(wp), ${f(R + 34)});
+        float keep = ${o.mode === 'near' ? 'clamp((1.0 - ramp - hsh) * 5.0, 0.0, 1.0)' : `clamp((ramp - hsh) * 5.0, 0.0, 1.0) * (1.0 - smoothstep(${f(o.fadeOut[0])}, ${f(o.fadeOut[1])}, dC))`} * step(length(wp), ${f(ROAM + 30)});
         ground = hillH(wp);
         keep *= mix(1.0, step(fract(hsh * 7.31), 0.05), uSnow);                       // winter: only a few dry stalks show through the snow
         float gust = sin(wp.x * 0.21 + wp.y * 0.12 - uTime * 1.5 + sin(wp.y * 0.08 + uTime * 0.25) * 2.2) * 0.5 + 0.5;
@@ -698,9 +701,9 @@ export function buildScenery(scene) {
     // 0.3 .. 1: draw that fraction of the grass and leaves (instances are in random order, so it thins evenly)
     setDetail(q) { for (const m of [grassNear, grassFar, foliage, woods.userData.leaves]) m.count = Math.floor(m.userData.full * q); },
     get season() { return season; },
-    update(t, px, pz, camera, pixelRatio = 1) {
+    update(t, px, pz, camera, pixelRatio = 1, py = 0) {
       U.time.value = t; U.center.value.set(px, pz); sea.group.rotation.y = t * 0.003; heaps.rotation.y = t * 0.0016;
-      sun.target.position.set(px, 0, pz); sun.position.set(px + SUN_DIR.x * 60, SUN_DIR.y * 60, pz + SUN_DIR.z * 60);
+      sun.target.position.set(px, py, pz); sun.position.set(px + SUN_DIR.x * 60, py + SUN_DIR.y * 60, pz + SUN_DIR.z * 60);
       for (const f of [flakes, seeds]) if (f.visible) { f.material.uniforms.uCam.value.copy(camera.position); f.material.uniforms.uSize.value = pixelRatio; }
     },
   };

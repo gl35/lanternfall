@@ -3,7 +3,7 @@ import * as CANNON from 'cannon-es';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
-import { buildScenery, softTexture, R, START, TREES } from './scenery.js';
+import { buildScenery, softTexture, R, START, TREES, WOODS, ROAM, hillHeight } from './scenery.js';
 import { sfx } from './audio.js';
 
 // ---------- renderer / scene ----------
@@ -29,10 +29,11 @@ function resize() {
 window.addEventListener('resize', resize); resize();
 
 // ---------- player ----------
-const player = { x: START.x, z: START.z, y: 0, vy: 0, face: 0, moving: 0, walkT: 0 };
+const player = { x: START.x, z: START.z, y: 0, g: 0, vy: 0, face: 0, moving: 0, walkT: 0 };   // y is height above the ground, g the ground's height under him
 const JUMP_V = 8.2, GRAVITY = 20;
 let camYaw = 0;                                            // 0 looks toward -z; forward = (sin, 0, -cos)
-const SPEED = 4.8, HAND_H = 2.15, HAND_F = 0.9, BALL_R = 0.45;
+let SPEED = 4.8, HAND_H = 2.15;
+const HAND_F = 0.9, BALL_R = 0.45;
 const fwd = (yaw, out) => out.set(Math.sin(yaw), 0, -Math.cos(yaw));
 
 const hero = new THREE.Group(), heroTilt = new THREE.Group();
@@ -64,19 +65,42 @@ function pickClips() {
   const t = find(/throw|cast|pitch/i);
   if (t) Object.assign(THROW, { clip: t, wind: 0, speed: 1.4, hold: Math.min(1.2, acts[t].getClip().duration / 1.4) });
 }
-new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).load(import.meta.env.BASE_URL + 'models/general-animated.glb', g => {
-  g.scene.scale.setScalar(2.5); g.scene.rotation.y = Math.PI;      // model faces +z; turn it to face "forward"
-  g.scene.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } if (o.isSkinnedMesh) o.frustumCulled = false; });
-  mixer = new THREE.AnimationMixer(g.scene);
-  for (const c of g.animations) {
-    for (const t of c.tracks) {                                    // the game moves him, not the clips
+// The heroes to pick from. A mount has no clips: it gallops by rocking and bounding, and covers ground faster.
+const HEROES = [
+  { file: 'general-animated.glb', scale: 2.5, turn: Math.PI, lift: 0, speed: 4.8, hand: 2.15, cam: 0 },
+  { file: 'warrior.glb', scale: 4.4, turn: Math.PI, lift: 0.489, speed: 9.5, hand: 3.3, cam: 1, mount: true },
+];
+let heroIx = Math.min(HEROES.length - 1, Math.max(0, +(localStorage.getItem('lf-hero') || 0) | 0)), HERO = HEROES[heroIx], heroModel = null, heroLoads = 0;
+const heroCache = {};
+function setHero(i) {
+  heroIx = (i + HEROES.length) % HEROES.length; HERO = HEROES[heroIx];
+  try { localStorage.setItem('lf-hero', heroIx); } catch (e) { /* private mode */ }
+  SPEED = HERO.speed; HAND_H = HERO.hand;
+  const want = ++heroLoads, show = g => {
+    if (want !== heroLoads) return;                                // he picked another one meanwhile
+    if (heroModel) heroTilt.remove(heroModel);
+    if (mixer) mixer.stopAllAction();
+    for (const k in acts) delete acts[k];
+    Object.assign(CLIP, { idle: null, walk: null, jump: null, win: null });
+    Object.assign(THROW, { clip: 'box_02', wind: 2.0, speed: 1.3, hold: 0.8 });
+    heroAct = null; heroMode = '';
+    mixer = new THREE.AnimationMixer(g.scene);
+    for (const c of g.animations) acts[c.name] = mixer.clipAction(c);
+    pickClips(); heroModel = g.scene; heroTilt.add(heroModel); heroLoaded = true;
+  };
+  if (heroCache[HERO.file]) return show(heroCache[HERO.file]);
+  const H = HERO;
+  new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).load(import.meta.env.BASE_URL + 'models/' + H.file, g => {
+    g.scene.scale.setScalar(H.scale); g.scene.rotation.y = H.turn; g.scene.position.y = H.lift * H.scale;   // turned to face "forward", feet on the ground
+    g.scene.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } if (o.isSkinnedMesh) o.frustumCulled = false; });
+    for (const c of g.animations) for (const t of c.tracks) {      // the game moves him, not the clips
       if (!/Hips\.position$/.test(t.name)) continue;
       for (let i = 0; i < t.values.length; i += 3) { t.values[i] = t.values[0]; t.values[i + 2] = t.values[2]; }
     }
-    acts[c.name] = mixer.clipAction(c);
-  }
-  pickClips(); heroTilt.add(g.scene); heroLoaded = true;
-}, undefined, e => console.error('character model failed to load', e));
+    heroCache[H.file] = g; show(g);
+  }, undefined, e => console.error('character model failed to load', e));
+}
+setHero(heroIx);
 function heroPlay(name, { fade = 0.25, once = false, speed = 1, at = null } = {}) {
   const a = acts[name]; if (!a) return;
   if (a !== heroAct) {
@@ -319,6 +343,7 @@ const elLvl = document.getElementById('lvl'), elLeft = document.getElementById('
 if (localStorage.getItem('lanternfall.played')) elHint.classList.add('off');
 function hud() { elLvl.textContent = level; elLeft.textContent = lanterns.length; }
 document.getElementById('restart').addEventListener('click', e => { e.stopPropagation(); transition(false); });
+document.getElementById('hero').addEventListener('click', e => { e.stopPropagation(); setHero(heroIx + 1); sfx.chime(2); });
 function transition(next) {
   if (state === 'fade') return;
   state = 'fade'; elFade.classList.add('on');
@@ -348,7 +373,7 @@ function aimFrom(x, y) {
 }
 window.addEventListener('pointerdown', e => {
   sfx.init();
-  if (e.target.closest && e.target.closest('#restart')) return;
+  if (e.target.closest && e.target.closest('#restart, #hero')) return;
   if (joy.id === null && e.pointerType !== 'mouse' && inJoyZone(e.clientX, e.clientY)) {
     joy.id = e.pointerId; joy.sx = e.clientX; joy.sy = e.clientY; joy.x = joy.y = 0; joyShow(true);
   } else if (aim.id === null) {
@@ -391,7 +416,7 @@ const dots = [];
 }
 const charge = new THREE.Mesh(sphereGeo, MAT.ball); charge.add(haloSprite(3.4, 0.4, 0xff8a3a)); charge.visible = false; scene.add(charge);
 const tmpV = new THREE.Vector3(), tmpF = new THREE.Vector3(), hand = new THREE.Vector3();
-function handPos(yaw, out) { fwd(yaw, tmpF); return out.set(player.x + tmpF.x * HAND_F, HAND_H + player.y, player.z + tmpF.z * HAND_F); }
+function handPos(yaw, out) { fwd(yaw, tmpF); return out.set(player.x + tmpF.x * HAND_F, HAND_H + player.y + player.g, player.z + tmpF.z * HAND_F); }
 function launchVel(yaw, power, out) {
   const speed = 8 + 18 * power, el = 0.08 + 0.12 * power;    // more pull throws harder and a little higher, so it goes farther
   return out.set(Math.sin(yaw) * Math.cos(el) * speed, Math.sin(el) * speed, -Math.cos(yaw) * Math.cos(el) * speed);
@@ -408,7 +433,7 @@ function showAim() {
     d.visible = on;
     if (!on) return;
     const t = (i + 1) * 0.06;
-    d.position.set(hand.x + tmpV.x * t, Math.max(0.12, hand.y + tmpV.y * t - 7 * t * t), hand.z + tmpV.z * t);
+    d.position.set(hand.x + tmpV.x * t, Math.max(player.g + 0.12, hand.y + tmpV.y * t - 7 * t * t), hand.z + tmpV.z * t);
   });
 }
 function fling(yawRel, power) {
@@ -480,7 +505,7 @@ function jump() {
 function movePlayer(dt) {
   if (player.y > 0 || player.vy > 0) {
     player.vy -= GRAVITY * dt; player.y += player.vy * dt;
-    if (player.y <= 0) { player.y = 0; player.vy = 0; dust(player.x, 0.15, player.z, 3); sfx.thump(0.25); }
+    if (player.y <= 0) { player.y = 0; player.vy = 0; dust(player.x, player.g + 0.15, player.z, 3); sfx.thump(0.25); }
   }
   let jx = joy.x, jy = joy.y;
   if (keys.has('KeyA') || keys.has('ArrowLeft')) jx -= 1;
@@ -497,16 +522,18 @@ function movePlayer(dt) {
     const mx = c * jx + s * -jy, mz = s * jx - c * -jy;      // right * jx + forward * (-jy)
     player.x += mx * SPEED * dt; player.z += mz * SPEED * dt;
     if (!(aim.on && aim.valid) && heroKick <= 0) player.face = Math.atan2(mx, -mz);
-    player.walkT += dt * (5 + 6 * l);
+    player.walkT += dt * (HERO.mount ? 4 + 5 * l : 5 + 6 * l);
   }
-  // stay on the island, and out of trees and blocks
-  const d = Math.hypot(player.x, player.z), lim = R - 1.3;
+  // stay this side of the mountains, and out of trees and blocks
+  const d = Math.hypot(player.x, player.z), lim = ROAM;
   if (d > lim) { player.x *= lim / d; player.z *= lim / d; }
   const push = (ox, oz, rad) => {
     const dx = player.x - ox, dz = player.z - oz, dd = Math.hypot(dx, dz);
     if (dd < rad && dd > 1e-4) { player.x = ox + dx / dd * rad; player.z = oz + dz / dd * rad; }
   };
   for (const t of TREES) push(t.x, t.z, 0.7 * t.s + 0.6);
+  if (d > R) for (const t of WOODS) push(t.x, t.z, t.r);
+  player.g = hillHeight(player.x, player.z);
   for (const o of objs) if (o.kind !== 'ball' && o.body.position.y < 2.4 + player.y && o.body.position.y > player.y - 0.5) push(o.body.position.x, o.body.position.z, 1.0);
 }
 
@@ -514,14 +541,17 @@ const camPos = new THREE.Vector3(), camAt = new THREE.Vector3();
 function updateCamera(dtReal) {
   if (window.__freecam) return;
   fwd(camYaw, tmpF);
-  const aiming = aim.on && aim.valid, D0 = (portrait ? 8.6 : 7.4) + (aiming ? 1.2 : 0);
-  let D = D0, H = portrait ? 4.6 : 3.8;
+  const aiming = aim.on && aim.valid, D0 = (portrait ? 8.6 : 7.4) + (aiming ? 1.2 : 0) + HERO.cam * 3;
+  let D = D0, H = (portrait ? 4.6 : 3.8) + HERO.cam * 1.4;
   // keep the camera out of the trees: slide it in toward the player, or duck under the canopy
-  const blocked = (d, k) => TREES.some(t => Math.hypot(player.x - tmpF.x * d - t.x, player.z - tmpF.z * d - t.z) < k * t.s);
+  const near = Math.hypot(player.x, player.z) > R ? WOODS.filter(t => Math.abs(t.x - player.x) < 22 && Math.abs(t.z - player.z) < 22) : [];   // hill trees close by
+  const blocked = (d, k) => { const x = player.x - tmpF.x * d, z = player.z - tmpF.z * d; return TREES.some(t => Math.hypot(x - t.x, z - t.z) < k * t.s) || near.some(t => Math.hypot(x - t.x, z - t.z) < k * 0.75 * t.r); };
   while (D > 3 && blocked(D, 4.6)) D -= 0.5;
   if (D <= 3) { H = 2.3; D = D0 * 0.75; while (D > 1.6 && blocked(D, 1.2)) D -= 0.4; }
-  camPos.set(player.x - tmpF.x * D, H + player.y * 0.5, player.z - tmpF.z * D);
-  camAt.set(player.x + tmpF.x * 7, 1.7 + player.y * 0.5, player.z + tmpF.z * 7);
+  camPos.set(player.x - tmpF.x * D, H + player.g + player.y * 0.5, player.z - tmpF.z * D);
+  camPos.y = Math.max(camPos.y, hillHeight(camPos.x, camPos.z) + 1.6);                        // never under a slope behind him
+  const ax = player.x + tmpF.x * 7, az = player.z + tmpF.z * 7;                                 // look along the slope he is on
+  camAt.set(ax, 1.7 + HERO.cam + player.y * 0.5 + player.g + (hillHeight(ax, az) - player.g) * 0.5, az);
   const k = camReady ? Math.min(1, dtReal * 7) : 1; camReady = true;
   camera.position.lerp(camPos, k);
   shake = Math.max(0, shake - dtReal * 1.6);
@@ -539,7 +569,7 @@ function step(dtReal) {
   physics(dt);
 
   if (state === 'won') {
-    if (Math.random() < dtReal * 30) fireflies(player.x + rnd(7), 0.3, player.z + rnd(7), 2, false);
+    if (Math.random() < dtReal * 30) fireflies(player.x + rnd(7), player.g + 0.3, player.z + rnd(7), 2, false);
     if (stateT > 3.2) transition(true);
   }
 
@@ -550,9 +580,10 @@ function step(dtReal) {
   hero.rotation.y += dy * Math.min(1, dtReal * 12);
   const bob = player.moving, stride = Math.sin(player.walkT);
   const air = player.y > 0, fake = CLIP.walk ? 0 : bob;      // with no walk clip he leans and bobs instead
-  hero.position.set(player.x, player.y + (air ? 0 : Math.abs(stride) * 0.09 * fake), player.z);
+  hero.position.set(player.x, player.g + player.y + (air ? 0 : Math.abs(stride) * (HERO.mount ? 0.3 : 0.09) * fake), player.z);
   const tuck = air && !CLIP.jump ? THREE.MathUtils.clamp(player.vy / JUMP_V, -1, 1) * -0.22 : 0;
-  heroTilt.rotation.set(-0.16 * fake + tuck, 0, stride * 0.05 * fake);
+  if (HERO.mount) heroTilt.rotation.set(Math.sin(player.walkT * 2 + 0.9) * 0.085 * bob + tuck * 1.3, 0, 0);   // a rocking gallop
+  else heroTilt.rotation.set(-0.16 * fake + tuck, 0, stride * 0.05 * fake);
   if (heroLoaded) {
     heroKick = Math.max(0, heroKick - dtReal / THROW.hold);
     const mode = state === 'won' ? 'win' : heroKick > 0 ? 'throw' : aiming ? 'aim' : air && CLIP.jump ? 'jump' : player.moving > 0.25 && CLIP.walk ? 'walk' : 'idle';
@@ -578,7 +609,7 @@ function step(dtReal) {
   }
   for (const l of lanterns) l.glow.material.opacity = 0.62 + Math.sin(time * 2.2 + l.phase) * 0.14;
   updateParts(dt, time);
-  scenery.update(time, player.x, player.z, camera, renderer.getPixelRatio());
+  scenery.update(time, player.x, player.z, camera, renderer.getPixelRatio(), player.g);
   updateCamera(dtReal);
 }
 
@@ -601,13 +632,13 @@ function frame(now) {
 // Scripted stepping for tests (the preview pane only runs frames while visible).
 window.game = {
   step(seconds = 1, dt = 1 / 60) { window.__manual = true; for (let t = 0; t < seconds; t += dt) step(dt); renderer.render(scene, camera); return this.state(); },
-  fling, jump, debug: { scene, camera, hero, acts, THROW, THREE, player, sites, renderer, get mixer() { return mixer; } },
+  fling, jump, setHero, debug: { scene, camera, hero, acts, THROW, THREE, player, sites, renderer, get mixer() { return mixer; } },
   walk(x, y) { window.__joy = x || y ? { x, y } : null; },
   setLevel(n) { level = n; buildLevel(); },
   setSeason(name) { scenery.setSeason(name); },
   auto() { window.__manual = false; },
   state() {
-    return { heroLoaded, level, season: scenery.season, detail: +detail.toFixed(2), state, lanterns: lanterns.length, total, objects: objs.length, sites: sites.length,
+    return { heroLoaded, hero: heroIx, g: +player.g.toFixed(2), level, season: scenery.season, detail: +detail.toFixed(2), state, lanterns: lanterns.length, total, objects: objs.length, sites: sites.length,
       x: +player.x.toFixed(2), y: +player.y.toFixed(2), z: +player.z.toFixed(2), clips: { ...CLIP, throw: THROW.clip }, hop: [+HOP.t0.toFixed(2), +HOP.t1.toFixed(2)], mode: heroMode, camYaw: +camYaw.toFixed(2),
       moving: objs.filter(o => o.body.sleepState !== CANNON.Body.SLEEPING).length };
   },
