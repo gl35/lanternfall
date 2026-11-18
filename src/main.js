@@ -582,8 +582,16 @@ function step(dtReal) {
   updateCamera(dtReal);
 }
 
-let last = performance.now();
+let last = performance.now(), detail = 1, fpsT = 0, fpsN = 0, fpsSum = 0;
+function watchFrameRate(ms) {                              // if frames run long for a while, draw less grass
+  if (ms > 250 || document.hidden) return;                 // tab was in the background
+  fpsSum += ms; fpsN++; fpsT += ms;
+  if (fpsT < 2500) return;
+  const avg = fpsSum / fpsN; fpsT = fpsN = fpsSum = 0;
+  if (avg > 24 && detail > 0.3) { detail = Math.max(0.3, detail * 0.72); scenery.setDetail(detail); }
+}
 function frame(now) {
+  if (!window.__manual) watchFrameRate(now - last);
   const dt = Math.min(0.05, (now - last) / 1000); last = now;
   if (!window.__manual) step(dt);
   renderer.render(scene, camera);
@@ -599,7 +607,7 @@ window.game = {
   setSeason(name) { scenery.setSeason(name); },
   auto() { window.__manual = false; },
   state() {
-    return { heroLoaded, level, season: scenery.season, state, lanterns: lanterns.length, total, objects: objs.length, sites: sites.length,
+    return { heroLoaded, level, season: scenery.season, detail: +detail.toFixed(2), state, lanterns: lanterns.length, total, objects: objs.length, sites: sites.length,
       x: +player.x.toFixed(2), y: +player.y.toFixed(2), z: +player.z.toFixed(2), clips: { ...CLIP, throw: THROW.clip }, hop: [+HOP.t0.toFixed(2), +HOP.t1.toFixed(2)], mode: heroMode, camYaw: +camYaw.toFixed(2),
       moving: objs.filter(o => o.body.sleepState !== CANNON.Body.SLEEPING).length };
   },

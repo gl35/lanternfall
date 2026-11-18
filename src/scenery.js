@@ -6,7 +6,6 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 export const R = 38;                                     // island radius
 export const START = { x: 0, z: 25 };                    // where the player begins, facing the centre
 export const SUN_DIR = new THREE.Vector3(-0.35, 0.62, -0.7).normalize();
-const GRASS_TILE = 34;                                   // side of the square of grass that follows the player
 const SNOW_BOX = 44;
 
 const SEASONS = {
@@ -157,27 +156,32 @@ function meadow(r) {
   return { mesh: m, mat, map };
 }
 
-// One square of grass tufts that wraps around the player in the vertex shader, so the whole island
-// looks covered while only the nearby blades are drawn. Gusts roll across it as travelling waves:
-// every blade leans the same way by (gust strength x height squared), and its tip brightens as it bends.
-function grassField(r, U) {
+// Grass is drawn as squares of tufts that wrap around the player in the vertex shader, so the whole island
+// looks covered while only nearby blades are drawn. Two layers: fine dense blades close up, and broader
+// tufts out to the distance. Gusts roll across as travelling waves: every blade leans the same way by
+// (gust strength x height squared), and its tip brightens as it bends.
+const GRASS_NEAR = { tile: 20, count: 80000, segs: 2, fadeIn: null, fadeOut: [7, 10], spread: [1, 0.7], h: [0.5, 0.3, 0.32],
+  blades: [[0.06, 1, 0.2, 0, 0], [0.055, 0.8, 2.3, 0.05, 0.03], [0.055, 0.9, 4.4, -0.04, 0.05]] };
+const GRASS_FAR = { tile: 66, count: 62000, segs: 1, fadeIn: [6, 9], fadeOut: [26, 33], spread: [1.2, 0.8], h: [0.55, 0.3, 0.34],
+  blades: [[0.2, 1, 0.2, 0, 0], [0.18, 0.8, 2.3, 0.14, 0.08], [0.18, 0.9, 4.4, -0.1, 0.12]] };
+function grassField(r, U, o) {
   const blade = (w, h, yaw, ox, oz) => {
-    const g = new THREE.PlaneGeometry(w, h, 1, 3); g.translate(0, h / 2, 0);
+    const g = new THREE.PlaneGeometry(w, h, 1, o.segs); g.translate(0, h / 2, 0);
     const p = g.attributes.position;
     for (let i = 0; i < p.count; i++) { const y = p.getY(i) / h; p.setX(i, p.getX(i) * (1 - y * 0.92)); p.setZ(i, y * y * 0.12 * h); }
     g.rotateY(yaw); g.translate(ox, 0, oz); return g;
   };
-  const parts = [blade(0.1, 1, 0.2, 0, 0), blade(0.09, 0.8, 2.3, 0.09, 0.05), blade(0.09, 0.9, 4.4, -0.06, 0.08)];
-  const count = parts.reduce((s, g) => s + g.attributes.position.count, 0);
+  const parts = o.blades.map(b => blade(...b));
+  const count = parts.reduce((n, g) => n + g.attributes.position.count, 0);
   const posA = new Float32Array(count * 3), norA = new Float32Array(count * 3), colA = new Float32Array(count * 3), idx = [];
   const base = new THREE.Color(0x157a2c), tip = new THREE.Color(0x9be24e), c = new THREE.Color();
-  let o = 0;
+  let k0 = 0;
   for (const g of parts) {
     const p = g.attributes.position;
-    for (const i of g.index.array) idx.push(i + o);
-    for (let i = 0; i < p.count; i++, o++) {
-      posA.set([p.getX(i), p.getY(i), p.getZ(i)], o * 3); norA.set([0, 1, 0], o * 3);
-      c.copy(base).lerp(tip, Math.pow(Math.min(1, Math.max(0, p.getY(i))), 1.4)); colA.set([c.r, c.g, c.b], o * 3);
+    for (const i of g.index.array) idx.push(i + k0);
+    for (let i = 0; i < p.count; i++, k0++) {
+      posA.set([p.getX(i), p.getY(i), p.getZ(i)], k0 * 3); norA.set([0, 1, 0], k0 * 3);
+      c.copy(base).lerp(tip, Math.pow(Math.min(1, Math.max(0, p.getY(i))), 1.4)); colA.set([c.r, c.g, c.b], k0 * 3);
     }
   }
   const geo = new THREE.BufferGeometry();
@@ -186,8 +190,10 @@ function grassField(r, U) {
   geo.setAttribute('color', new THREE.BufferAttribute(colA, 3));
   geo.setIndex(idx);
 
-  const T = GRASS_TILE.toFixed(1), H = (GRASS_TILE / 2).toFixed(1);
+  const f = n => n.toFixed(2), T = f(o.tile), H = f(o.tile / 2);
+  const fadeIn = o.fadeIn ? `smoothstep(${f(o.fadeIn[0])}, ${f(o.fadeIn[1])}, dC)` : '1.0';
   const mat = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
+  mat.customProgramCacheKey = () => 'grass' + o.tile;     // the two layers compile different shaders
   mat.onBeforeCompile = s => {
     s.uniforms.uTime = U.time; s.uniforms.uCenter = U.center; s.uniforms.uSnow = U.snow;
     s.vertexShader = `uniform float uTime, uSnow; uniform vec2 uCenter; vec2 wrapOff; float bend;\n` + s.vertexShader
@@ -195,16 +201,19 @@ function grassField(r, U) {
         vec3 ip = instanceMatrix[3].xyz;
         vec2 wp = mod(ip.xz - uCenter + ${H}, ${T}) - ${H} + uCenter;
         wrapOff = wp - ip.xz;
-        float keep = (1.0 - smoothstep(${(GRASS_TILE * 0.2).toFixed(1)}, ${H}, distance(wp, uCenter))) * step(length(wp), ${(R * 0.985).toFixed(2)});
+        float dC = distance(wp, uCenter);
+        float keep = (1.0 - smoothstep(${f(o.fadeOut[0])}, ${f(o.fadeOut[1])}, dC)) * ${fadeIn} * step(length(wp), ${f(R * 0.985)});
         float hsh = fract(sin(dot(ip.xz, vec2(12.9898, 78.233))) * 43758.5453);
-        keep *= mix(1.0, step(hsh, 0.07), uSnow);                       // winter: only a few dry stalks show through the snow
+        keep *= mix(1.0, step(hsh, 0.05), uSnow);                       // winter: only a few dry stalks show through the snow
         float gust = sin(wp.x * 0.21 + wp.y * 0.12 - uTime * 1.5 + sin(wp.y * 0.08 + uTime * 0.25) * 2.2) * 0.5 + 0.5;
         gust = gust * gust * (0.75 + 0.25 * sin(wp.x * 0.05 - wp.y * 0.07 + uTime * 0.4));
         float flutter = sin(uTime * 4.3 + wp.x * 2.1 - wp.y * 1.7) * 0.07;
         bend = (0.1 + gust * 0.62 + flutter) * mix(1.0, 1.5, uSnow);
         transformed.y *= mix(1.0, 0.5, uSnow);
         transformed *= keep;
-        vColor.rgb *= 0.86 + gust * 0.5 * position.y;                   // the sheen that travels with each gust
+        float patchTone = sin(wp.x * 0.31 + sin(wp.y * 0.23) * 1.7) * sin(wp.y * 0.27 - wp.x * 0.11);
+        vColor.rgb *= vec3(1.0 + patchTone * 0.10, 1.0 + patchTone * 0.04, 1.0 - patchTone * 0.12);   // drifts of yellower and bluer green
+        vColor.rgb *= 0.84 + gust * 0.55 * position.y;                  // the sheen that travels with each gust
         vColor.rgb = mix(vColor.rgb, vec3(0.86, 0.80, 0.62), uSnow);`)
       .replace('#include <project_vertex>', `vec4 mvPosition = instanceMatrix * vec4(transformed, 1.0);
         float lean = bend * mvPosition.y * mvPosition.y;
@@ -220,15 +229,50 @@ function grassField(r, U) {
     s.fragmentShader = 'uniform float uSnow;\n' + s.fragmentShader.replace('#include <opaque_fragment>', `#include <opaque_fragment>
         gl_FragColor.rgb = mix(gl_FragColor.rgb, vec3(0.62, 0.55, 0.36), uSnow * 0.9);`);
   };
-  const N = 40000, m = new THREE.InstancedMesh(geo, mat, N), d = new THREE.Object3D(), tint = new THREE.Color();
-  for (let k = 0; k < N; k++) {
-    const x = r() * GRASS_TILE, z = r() * GRASS_TILE, patch = 0.5 + 0.5 * bump(x * 0.7, 0, z * 0.7);
+  const m = new THREE.InstancedMesh(geo, mat, o.count), d = new THREE.Object3D(), tint = new THREE.Color();
+  for (let k = 0; k < o.count; k++) {
+    const x = r() * o.tile, z = r() * o.tile, patch = 0.5 + 0.5 * bump(x * 0.7, 0, z * 0.7), w = o.spread[0] + r() * o.spread[1];
     d.position.set(x, 0, z); d.rotation.set(0, r() * Math.PI * 2, 0);
-    d.scale.set(1.2 + r() * 0.9, 0.5 + r() * 0.3 + patch * 0.32, 1.2 + r() * 0.9);
+    d.scale.set(w, o.h[0] + r() * o.h[1] + patch * o.h[2], w);
     d.updateMatrix(); m.setMatrixAt(k, d.matrix);
-    tint.setHSL(0.29 + patch * 0.04 + r() * 0.03, 0.75, 0.52 + r() * 0.12); m.setColorAt(k, tint);
+    tint.setHSL(0.28 + patch * 0.05 + r() * 0.04, 0.72 + r() * 0.1, 0.5 + r() * 0.14); m.setColorAt(k, tint);
   }
-  m.receiveShadow = true; m.frustumCulled = false;
+  m.receiveShadow = true; m.frustumCulled = false; m.userData.full = o.count;
+  return m;
+}
+
+// Leaves: thousands of small flat leaves on the surface of every tree's crown, each catching the light
+// at its own angle and fluttering in the wind.
+function leafCloud(r, U, trees) {
+  const geo = new THREE.CircleGeometry(0.125, 6); geo.scale(1.7, 1, 1);
+  const mat = new THREE.MeshLambertMaterial({ side: THREE.DoubleSide });
+  mat.customProgramCacheKey = () => 'leaves';
+  mat.onBeforeCompile = s => {
+    s.uniforms.uTime = U.time;
+    s.vertexShader = 'uniform float uTime;\n' + s.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>
+      vec3 lp = instanceMatrix[3].xyz;
+      float fl = sin(uTime * 3.1 + lp.x * 1.7 + lp.z * 1.3 + lp.y) * 0.5 + sin(uTime * 1.3 + lp.x * 0.3) * 0.5;
+      transformed.z += fl * 0.07 * (abs(position.x) + 0.1);`);
+  };
+  const PER = 150, total = trees.reduce((n, t) => n + t.userData.puffs.length * PER, 0);
+  const m = new THREE.InstancedMesh(geo, mat, total), d = new THREE.Object3D(), c = new THREE.Color(), n = new THREE.Vector3(), p = new THREE.Vector3();
+  const lo = new THREE.Color(0x1d7a30), hi = new THREE.Color(0xd9f56a), zAxis = new THREE.Vector3(0, 0, 1);
+  let k = 0;
+  for (const t of trees) {
+    t.updateMatrixWorld(true);
+    const sc = t.scale.x;
+    for (const [x, y, z, s] of t.userData.puffs) for (let i = 0; i < PER; i++, k++) {
+      const u = r() * 2 - 0.55, a = r() * 6.283, cu = Math.min(1, Math.max(-1, u)), q = Math.sqrt(1 - cu * cu);   // biased to the upper side
+      n.set(Math.cos(a) * q, cu, Math.sin(a) * q);
+      p.set(x + n.x * s * 1.04, y + n.y * s * 0.84, z + n.z * s * 1.04).applyMatrix4(t.matrixWorld);
+      n.transformDirection(t.matrixWorld);
+      d.position.copy(p); d.quaternion.setFromUnitVectors(zAxis, n);
+      d.rotateZ(r() * 6.283); d.rotateX((r() - 0.5) * 1.1); d.rotateY((r() - 0.5) * 1.1);
+      d.scale.setScalar(sc * (0.7 + r() * 0.7)); d.updateMatrix(); m.setMatrixAt(k, d.matrix);
+      c.copy(lo).lerp(hi, THREE.MathUtils.clamp(n.y * 0.55 + 0.4 + (r() - 0.5) * 0.35, 0, 1)); m.setColorAt(k, c);
+    }
+  }
+  m.castShadow = false; m.receiveShadow = true; m.frustumCulled = false; m.userData.full = total;
   return m;
 }
 
@@ -245,8 +289,8 @@ function flowers(r) {
   let cx = 0, cz = 0, hue = 0;
   for (let i = 0; i < N; i++) {
     if (i % 26 === 0) { const a = r() * 6.283, rad = Math.sqrt(r()) * (R - 3); cx = Math.cos(a) * rad; cz = Math.sin(a) * rad; hue = Math.floor(r() * hues.length); }
-    const a = r() * 6.283, rad = Math.sqrt(r()) * 3.6, s = 0.8 + r() * 0.7;
-    d.position.set(cx + Math.cos(a) * rad, 0.62 + r() * 0.3, cz + Math.sin(a) * rad);
+    const a = r() * 6.283, rad = Math.sqrt(r()) * 3.6, s = 1.1 + r() * 0.8;
+    d.position.set(cx + Math.cos(a) * rad, 0.8 + r() * 0.3, cz + Math.sin(a) * rad);
     d.rotation.set((r() - 0.5) * 0.7, r() * 6, (r() - 0.5) * 0.7); d.scale.setScalar(s); d.updateMatrix();
     pm.setMatrixAt(i, d.matrix);
     c.set(r() < 0.75 ? hues[hue] : hues[Math.floor(r() * hues.length)]); pm.setColorAt(i, c);
@@ -319,13 +363,13 @@ function tree(r, bareGeo) {
   }
   const bare = new THREE.Mesh(bareGeo, twigMat); bare.castShadow = true; bare.visible = false;
   g.add(leaves, bare);
-  g.userData = { leaves, bare };
+  g.userData = { leaves, bare, puffs };
   return g;
 }
 
 // Snowflakes in a box that wraps around the camera, falling and blown sideways.
-function snowfall(r, U) {
-  const N = 5200, pos = new Float32Array(N * 3), seed = new Float32Array(N);
+function specks(r, U, { N, fall, wind, size, tint, alpha }) {
+  const pos = new Float32Array(N * 3), seed = new Float32Array(N);
   for (let i = 0; i < N; i++) { pos.set([r() * SNOW_BOX, r() * SNOW_BOX, r() * SNOW_BOX], i * 3); seed[i] = r(); }
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
@@ -333,19 +377,19 @@ function snowfall(r, U) {
   const B = SNOW_BOX.toFixed(1), HB = (SNOW_BOX / 2).toFixed(1);
   const mat = new THREE.ShaderMaterial({
     transparent: true, depthWrite: false, fog: false,
-    uniforms: { uTime: U.time, uCam: { value: new THREE.Vector3() }, uSize: { value: 1 } },
+    uniforms: { uTime: U.time, uCam: { value: new THREE.Vector3() }, uSize: { value: 1 }, uTint: { value: new THREE.Color(tint) } },
     vertexShader: `attribute float seed; uniform float uTime, uSize; uniform vec3 uCam; varying float vA;
       void main(){ vec3 p = position;
-        p.y -= uTime * (2.4 + seed * 2.2);
-        p.x += uTime * (5.0 + seed * 3.0) + sin(uTime * 1.3 + seed * 40.0) * 0.9;
-        p.z += uTime * 1.6 + cos(uTime * 1.1 + seed * 31.0) * 0.9;
+        p.y -= uTime * (${fall.toFixed(2)} * (1.0 + seed * 0.9)) - sin(uTime * 0.7 + seed * 20.0) * ${(fall < 1 ? 0.8 : 0).toFixed(1)};
+        p.x += uTime * (${wind.toFixed(2)} * (1.0 + seed * 0.6)) + sin(uTime * 1.3 + seed * 40.0) * 0.9;
+        p.z += uTime * ${(wind * 0.32).toFixed(2)} + cos(uTime * 1.1 + seed * 31.0) * 0.9;
         p = mod(p - uCam + ${HB}, ${B}) - ${HB} + uCam;
         vec4 mv = modelViewMatrix * vec4(p, 1.0);
-        gl_PointSize = uSize * (0.55 + seed * 0.9) * 95.0 / max(1.5, -mv.z);
-        vA = (1.0 - smoothstep(${(SNOW_BOX * 0.3).toFixed(1)}, ${HB}, -mv.z)) * (0.55 + seed * 0.45);
+        gl_PointSize = uSize * (0.55 + seed * 0.9) * ${size.toFixed(1)} / max(1.5, -mv.z);
+        vA = (1.0 - smoothstep(${(SNOW_BOX * 0.3).toFixed(1)}, ${HB}, -mv.z)) * (0.55 + seed * 0.45) * ${alpha.toFixed(2)};
         gl_Position = projectionMatrix * mv; }`,
-    fragmentShader: `varying float vA; void main(){ float d = length(gl_PointCoord - 0.5);
-      gl_FragColor = vec4(1.0, 1.0, 1.0, vA * (1.0 - smoothstep(0.15, 0.5, d))); }`,
+    fragmentShader: `varying float vA; uniform vec3 uTint; void main(){ float d = length(gl_PointCoord - 0.5);
+      gl_FragColor = vec4(uTint, vA * (1.0 - smoothstep(0.15, 0.5, d))); }`,
   });
   const pts = new THREE.Points(geo, mat); pts.frustumCulled = false; pts.visible = false;
   return pts;
@@ -360,7 +404,7 @@ export function buildScenery(scene) {
 
   scene.add(islandMesh(R, 24, 1.3, 120));
   const ground = meadow(r); scene.add(ground.mesh);
-  scene.add(grassField(r, U));
+  const grassNear = grassField(r, U, GRASS_NEAR), grassFar = grassField(r, U, GRASS_FAR); scene.add(grassNear, grassFar);
   const blooms = flowers(r); scene.add(blooms);
 
   const bareGeos = [branchGeo(r), branchGeo(r), branchGeo(r)], trees = [];
@@ -368,6 +412,7 @@ export function buildScenery(scene) {
     const m = tree(r, bareGeos[i % bareGeos.length]); m.position.set(t.x, 0, t.z); m.scale.setScalar(t.s * 1.5); m.rotation.y = r() * 6;
     scene.add(m); trees.push(m);
   });
+  const foliage = leafCloud(r, U, trees); scene.add(foliage);
   for (let i = 0; i < 46; i++) {                             // rounded boulders, a few big ones
     const a = r() * 6.283, rad = Math.sqrt(r()) * (R - 1.5), s = (i < 6 ? 0.9 : 0.25) + r() * 0.5;
     const x = Math.cos(a) * rad, z = Math.sin(a) * rad;
@@ -382,7 +427,8 @@ export function buildScenery(scene) {
     const ft = tree(r, bareGeos[0]); ft.scale.setScalar(s * 0.3); ft.position.set(x, y, z); scene.add(ft); trees.push(ft);
   }
 
-  const flakes = snowfall(r, U); scene.add(flakes);
+  const flakes = specks(r, U, { N: 5200, fall: 2.4, wind: 5.5, size: 95, tint: 0xffffff, alpha: 1 }); scene.add(flakes);
+  const seeds = specks(r, U, { N: 700, fall: 0.12, wind: 1.6, size: 34, tint: 0xfffbd0, alpha: 0.85 }); scene.add(seeds);
 
   const sun = new THREE.DirectionalLight(0xffffff, 3);
   sun.castShadow = true;
@@ -410,18 +456,20 @@ export function buildScenery(scene) {
     ground.mat.map = S.snow ? null : ground.map; ground.mat.color.set(S.ground); ground.mat.needsUpdate = true;
     rockMat.color.set(S.rock); trunkMat.color.set(S.trunk);
     U.snow.value = S.snow;
-    heaps.visible = blooms.visible = !S.snow; flakes.visible = !!S.snow;
+    heaps.visible = blooms.visible = foliage.visible = seeds.visible = !S.snow; flakes.visible = !!S.snow;
     for (const t of trees) { t.userData.leaves.visible = !S.snow; t.userData.bare.visible = !!S.snow; }
   }
   setSeason('summer');
 
   return {
     setSeason,
+    // 0.3 .. 1: draw that fraction of the grass and leaves (instances are in random order, so it thins evenly)
+    setDetail(q) { for (const m of [grassNear, grassFar, foliage]) m.count = Math.floor(m.userData.full * q); },
     get season() { return season; },
     update(t, px, pz, camera, pixelRatio = 1) {
       U.time.value = t; U.center.value.set(px, pz); sea.group.rotation.y = t * 0.003; heaps.rotation.y = t * 0.0016;
       sun.target.position.set(px, 0, pz); sun.position.set(px + SUN_DIR.x * 60, SUN_DIR.y * 60, pz + SUN_DIR.z * 60);
-      if (flakes.visible) { flakes.material.uniforms.uCam.value.copy(camera.position); flakes.material.uniforms.uSize.value = pixelRatio; }
+      for (const f of [flakes, seeds]) if (f.visible) { f.material.uniforms.uCam.value.copy(camera.position); f.material.uniforms.uSize.value = pixelRatio; }
     },
   };
 }
