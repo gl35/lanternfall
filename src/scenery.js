@@ -95,24 +95,32 @@ function hills() {
 }
 
 // Woods on the hills: rounded crowns in the same painted tones as the meadow's trees, yellow above, teal below.
-function hillWoods(r) {
-  const geo = new THREE.SphereGeometry(1, 14, 10), p = geo.attributes.position, col = new Float32Array(p.count * 3), c = new THREE.Color();
-  for (let i = 0; i < p.count; i++) {
-    const y = p.getY(i), k = 1 + bump(p.getX(i) * 2.2, y * 2.2, p.getZ(i) * 2.2) * 0.22;
-    const f = THREE.MathUtils.clamp(y * 0.5 + 0.42, 0, 0.999) * 3.2, i0 = Math.floor(f);          // mostly greens; only the very tops catch yellow
-    c.copy(TONES[i0]).lerp(TONES[i0 + 1], f - i0); col.set([c.r, c.g, c.b], i * 3);
-    p.setXYZ(i, p.getX(i) * k, y * k, p.getZ(i) * k);
-  }
-  geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
-  const N = 700, m = new THREE.InstancedMesh(geo, new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false }), N), d = new THREE.Object3D();
-  let cx = 0, cz = 0;
+function hillWoods(r, U) {
+  const N = 700, PER = 48, group = new THREE.Group(), d = new THREE.Object3D(), c = new THREE.Color(), n = new THREE.Vector3();
+  const sunXZ = new THREE.Vector2(SUN_DIR.x, SUN_DIR.z).normalize();
+  const cores = new THREE.InstancedMesh(new THREE.SphereGeometry(1, 10, 8), new THREE.MeshBasicMaterial({ color: 0x17604e, toneMapped: false }), N);
+  const trunks = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.1, 0.17, 1, 6), new THREE.MeshBasicMaterial({ color: 0x8a5a44, toneMapped: false }), N);
+  const leaves = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1), clumpMaterial(U), N * PER);
+  let cx = 0, cz = 0, k = 0;
   for (let i = 0; i < N; i++) {
     if (i % 9 === 0) { const a = r() * 6.283, rad = 105 + Math.pow(r(), 1.3) * 230; cx = Math.cos(a) * rad; cz = Math.sin(a) * rad; }   // copses
-    const x = cx + (r() - 0.5) * 30, z = cz + (r() - 0.5) * 30, sc = 2.2 + r() * 2.6;
-    d.position.set(x, hillHeight(x, z) + sc * 0.75, z); d.scale.set(sc, sc * 0.85, sc); d.rotation.y = r() * 6; d.updateMatrix(); m.setMatrixAt(i, d.matrix);
+    const x = cx + (r() - 0.5) * 30, z = cz + (r() - 0.5) * 30, sc = 2.2 + r() * 2.6, ground = hillHeight(x, z), stem = sc * (0.45 + r() * 0.25), cy = ground + stem + sc * 0.55;
+    d.rotation.set(0, 0, 0);
+    d.position.set(x, ground + stem / 2, z); d.scale.set(sc * 0.7, stem + sc * 0.3, sc * 0.7); d.updateMatrix(); trunks.setMatrixAt(i, d.matrix);
+    d.position.set(x, cy, z); d.scale.set(sc * 0.66, sc * 0.5, sc * 0.66); d.updateMatrix(); cores.setMatrixAt(i, d.matrix);
+    for (let j = 0; j < PER; j++, k++) {
+      const cu = r() * 1.3 - 0.3, a = r() * 6.283, q = Math.sqrt(1 - cu * cu), rad = 0.6 + r() * 0.48;
+      n.set(Math.cos(a) * q, cu, Math.sin(a) * q);
+      d.position.set(x + n.x * sc * rad, cy + n.y * sc * 0.78 * rad, z + n.z * sc * rad);
+      d.scale.setScalar(sc * (0.75 + r() * 0.5)); d.updateMatrix(); leaves.setMatrixAt(k, d.matrix);
+      const tone = n.y * 0.62 + (n.x * sunXZ.x + n.z * sunXZ.y) * 0.3 + (rad - 0.85) * 0.5 + (r() - 0.5) * 0.3 + 0.46;
+      const f = THREE.MathUtils.clamp(tone, 0, 0.999) * (TONES.length - 1), i0 = Math.floor(f);
+      c.copy(TONES[i0]).lerp(TONES[i0 + 1], Math.min(1, (f - i0) * 1.6)); leaves.setColorAt(k, c);
+    }
   }
-  m.frustumCulled = false;
-  return m;
+  cores.frustumCulled = trunks.frustumCulled = leaves.frustumCulled = false; leaves.userData.full = N * PER;
+  group.add(trunks, cores, leaves); group.userData.leaves = leaves;
+  return group;
 }
 
 function sky() {
@@ -175,6 +183,7 @@ function cloudTexture(r) {
       if (r() < 0.6) { const a3 = -Math.PI * (0.1 + r() * 0.8); lobes.push([x2 + Math.cos(a3) * r2 * 0.85, y2 + Math.sin(a3) * r2 * 0.85, r2 * (0.4 + r() * 0.25)]); }
     }
   }
+  for (let i = 0; i < 10; i++) lobes.push([W * (x0 + span * (0.06 + 0.88 * (i + 0.5) / 10)), base - H * 0.105, H * 0.12]);   // a solid row along the bottom, so no sky shows through
   g.fillStyle = '#fff';
   for (const [x, y, rad] of lobes) { g.beginPath(); g.arc(x, y, rad, 0, 7); g.fill(); }             // the silhouette
   g.beginPath(); g.ellipse(W * (x0 + span / 2), base - H * 0.03, W * span * 0.56, H * 0.075, 0, 0, 7); g.fill();   // a level underside
@@ -388,8 +397,10 @@ function clumpTexture(r) {
 // its lobes so no underlying shape shows. Colour is painted, not lit: every clump takes one of five flat
 // tones from how far up its lobe it sits and how much it faces the sun - yellow on top of each lobe,
 // green on the sides, deep teal in the pockets between lobes and underneath.
-function leafCloud(r, U, trees) {
-  const mat = new THREE.MeshBasicMaterial({ map: clumpTexture(rng(9)), alphaTest: 0.5, side: THREE.DoubleSide, toneMapped: false });
+let clumpMat = null;
+function clumpMaterial(U) {
+  if (clumpMat) return clumpMat;
+  const mat = clumpMat = new THREE.MeshBasicMaterial({ map: clumpTexture(rng(9)), alphaTest: 0.5, side: THREE.DoubleSide, toneMapped: false });
   mat.customProgramCacheKey = () => 'leafclumps';
   mat.onBeforeCompile = s => {
     s.uniforms.uTime = U.time;
@@ -403,6 +414,10 @@ function leafCloud(r, U, trees) {
       mvPosition.xy += lq;
       gl_Position = projectionMatrix * mvPosition;`);
   };
+  return mat;
+}
+function leafCloud(r, U, trees) {
+  const mat = clumpMaterial(U);
   const PER = 215, UNDER = 45, BASE_Y = 2.75, total = trees.reduce((n, t) => n + t.userData.puffs.length * (PER + UNDER), 0);
   const m = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1), mat, total), d = new THREE.Object3D(), c = new THREE.Color();
   const n = new THREE.Vector3(), p = new THREE.Vector3(), sunXZ = new THREE.Vector2(SUN_DIR.x, SUN_DIR.z).normalize();
@@ -633,7 +648,7 @@ export function buildScenery(scene) {
   });
   const foliage = leafCloud(r, U, trees); scene.add(foliage);
   const land = hills(); scene.add(land);
-  const woods = hillWoods(r); scene.add(woods);
+  const woods = hillWoods(r, U); scene.add(woods);
   for (let i = 0; i < 46; i++) {                             // rounded boulders, a few big ones
     const a = r() * 6.283, rad = Math.sqrt(r()) * (R - 1.5), s = (i < 6 ? 0.9 : 0.25) + r() * 0.5;
     const x = Math.cos(a) * rad, z = Math.sin(a) * rad;
@@ -681,7 +696,7 @@ export function buildScenery(scene) {
   return {
     setSeason,
     // 0.3 .. 1: draw that fraction of the grass and leaves (instances are in random order, so it thins evenly)
-    setDetail(q) { for (const m of [grassNear, grassFar, foliage]) m.count = Math.floor(m.userData.full * q); },
+    setDetail(q) { for (const m of [grassNear, grassFar, foliage, woods.userData.leaves]) m.count = Math.floor(m.userData.full * q); },
     get season() { return season; },
     update(t, px, pz, camera, pixelRatio = 1) {
       U.time.value = t; U.center.value.set(px, pz); sea.group.rotation.y = t * 0.003; heaps.rotation.y = t * 0.0016;
