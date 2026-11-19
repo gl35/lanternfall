@@ -167,7 +167,7 @@ function kidMount(kind) {
   kid.mixer.stopAllAction(); kid.act = null; kid.x = e.x; kid.z = e.z;
   const g = kid.group; g.rotation.set(0, 0, 0);
   if (kind === 'swing') { e.pivot.add(g); g.position.set(0, -e.L + 0.035, 0); kid.pose = KID_POSE.stand; e.want = 0.55; }
-  else { e.sway.add(g); g.rotation.order = 'YXZ'; g.rotation.set(-Math.PI / 2, Math.PI / 2, 0); g.position.set(0.95, -0.5, 0); kid.pose = KID_POSE.lie; e.want = 0.13; }
+  else { e.sway.add(g); g.rotation.order = 'YXZ'; g.rotation.set(-Math.PI / 2, Math.PI / 2, 0); g.position.set(0.95, -0.5 - e.drop, 0); kid.pose = KID_POSE.lie; e.want = 0.1; }
 }
 function kidDismount() {
   const e = play[kid.ride]; if (!e) return;
@@ -551,15 +551,22 @@ const play = { swing: null, hammock: null, spots: [] };
     m.position.copy(a).add(b).multiplyScalar(0.5); m.quaternion.setFromUnitVectors(UP, b.clone().sub(a).normalize()); return m;
   };
   const knob = (p, r, mat) => { const m = new THREE.Mesh(sphereGeo, mat); m.scale.setScalar(r); m.position.copy(p); m.castShadow = true; return m; };
-  // two open spots side by side, as near to where he starts as the trees and first tower allow
-  const ok = (x, z) => Math.hypot(x, z) < R - 7 && TREES.every(t => Math.hypot(t.x - x, t.z - z) > 5.5) && Math.hypot(x - START.x, z - START.z) > 8
-    && Math.hypot(x - START.x, z - START.z + 11) > 10 && Math.hypot(x - npc.x, z - npc.z) > 7;
-  let best = null;
-  for (let x = -R; x <= R; x += 1.5) for (let z = -R; z <= R; z += 1.5) for (let a = 0; a < 6.2; a += 0.52) {
-    const hx = x + Math.cos(a) * 7.5, hz = z + Math.sin(a) * 7.5, d = Math.hypot(x - START.x, z - START.z) + Math.hypot(hx - START.x, hz - START.z);
-    if (ok(x, z) && ok(hx, hz) && (!best || d < best.d)) best = { x, z, hx, hz, d };
+  // the hammock hangs between the two trees that stand closest together; the swing takes the open spot nearest to where he starts
+  const clear = (x, z) => Math.hypot(x - START.x, z - START.z) > 8 && Math.hypot(x - START.x, z - START.z + 11) > 9 && Math.hypot(x - npc.x, z - npc.z) > 7;
+  let pair = null;
+  for (let i = 0; i < TREES.length; i++) for (let j = i + 1; j < TREES.length; j++) {
+    const a = TREES[i], b = TREES[j], len = Math.hypot(a.x - b.x, a.z - b.z), mx = (a.x + b.x) / 2, mz = (a.z + b.z) / 2;
+    if (len < 6.5 || len > 11 || Math.hypot(mx, mz) > R - 6 || !clear(mx, mz)) continue;
+    const d = len * 3 + Math.hypot(mx - START.x, mz - START.z) * 0.5;
+    if (!pair || d < pair.d) pair = { a, b, len, d };
   }
-  if (!best) best = { x: -14, z: 14, hx: -20, hz: 9 };
+  const best = pair ? { hx: (pair.a.x + pair.b.x) / 2, hz: (pair.a.z + pair.b.z) / 2 } : { hx: -20, hz: 9 };
+  const ok = (x, z) => Math.hypot(x, z) < R - 7 && TREES.every(t => Math.hypot(t.x - x, t.z - z) > 5.5) && clear(x, z) && Math.hypot(x - best.hx, z - best.hz) > 7;
+  best.x = -14; best.z = 14; best.d = 1e9;
+  for (let x = -R; x <= R; x += 1.5) for (let z = -R; z <= R; z += 1.5) {
+    const d = Math.hypot(x - START.x, z - START.z);
+    if (d < best.d && ok(x, z)) { best.x = x; best.z = z; best.d = d; }
+  }
   const face = (x, z) => Math.atan2(START.x - x, START.z - z);
 
   // the swing: an A-frame of poles, two ropes and a plank
@@ -575,25 +582,30 @@ const play = { swing: null, hammock: null, spots: [] };
     play.swing = { x: best.x, z: best.z, g, pivot, amp: 0.05, want: 0.05, L, rider: false };
     play.spots.push({ x: best.x, z: best.z, r: 1.7 });
   }
-  // the hammock: striped cloth slung between two posts
+  // the hammock: striped cloth roped to two trees (or to its own posts, were there no two trees near enough)
   {
-    const g = new THREE.Group(); g.position.set(best.hx, 0, best.hz); g.rotation.y = face(best.hx, best.hz) + 1.2;
-    const PX = 2.05, PH = 1.5, HL = 1.35;
-    for (const sx of [-1, 1]) g.add(bar(V(sx * (PX - 0.12), -0.1, 0), V(sx * PX, PH, 0), 0.085, MAT.wood), knob(V(sx * PX, PH, 0), 0.11, MAT.dark));
-    const sway = new THREE.Group(); sway.position.y = PH - 0.08;
+    const g = new THREE.Group(); g.position.set(best.hx, 0, best.hz);
+    g.rotation.y = pair ? Math.atan2(-(pair.b.z - pair.a.z), pair.b.x - pair.a.x) : face(best.hx, best.hz) + 1.2;
+    const PX = pair ? pair.len / 2 : 2.4, TIE = pair ? 2.7 : 1.6, DROP = pair ? 0.85 : 0.1, HL = 1.6, KX = HL + 0.5;
+    if (!pair) for (const sx of [-1, 1]) g.add(bar(V(sx * (PX - 0.12), -0.1, 0), V(sx * PX, TIE, 0), 0.085, MAT.wood), knob(V(sx * PX, TIE, 0), 0.11, MAT.dark));
+    const sway = new THREE.Group(); sway.position.y = TIE;                // it rocks about the line between the two ties
     const geo = new THREE.PlaneGeometry(HL * 2, 1, 28, 10), p = geo.attributes.position, col = [], c = new THREE.Color();
     for (let i = 0; i < p.count; i++) {
       const u = p.getX(i) / HL, v = p.getY(i), k = 1 - u * u;
-      p.setXYZ(i, u * HL, -0.62 * (1 - u * u * u * u) + 1.5 * v * v * (0.35 + 0.65 * k), v * (0.3 + 0.75 * Math.sqrt(Math.max(0, k)) ) * 1.05);
+      p.setXYZ(i, u * HL, -DROP - 0.62 * (1 - u * u * u * u) + 1.5 * v * v * (0.35 + 0.65 * k), v * (0.3 + 0.75 * Math.sqrt(Math.max(0, k)) ) * 1.05);
       c.set(Math.floor((v + 0.5) * 6.999) % 2 ? 0xf3ead2 : 0xd9503a); col.push(c.r, c.g, c.b);
     }
     geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3)); geo.computeVertexNormals();
     const cloth = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ vertexColors: true, side: THREE.DoubleSide, roughness: 0.95 })); cloth.castShadow = cloth.receiveShadow = true;
     sway.add(cloth);
-    for (const sx of [-1, 1]) for (const z of [-0.3, 0, 0.3]) sway.add(bar(V(sx * HL, 0, z), V(sx * (PX - 0.02), 0.06, 0), 0.014, ropeMat));
+    for (const sx of [-1, 1]) {                                           // cords gather to a knot, and one rope runs from it up to the trunk
+      const kn = V(sx * KX, -DROP + 0.13, 0);
+      for (const z of [-0.16, 0, 0.16]) sway.add(bar(V(sx * HL, -DROP + 1.5 * 0.25 * 0.35 * (z ? 1 : 0), z), kn, 0.012, ropeMat));
+      sway.add(knob(kn, 0.045, ropeMat), bar(kn, V(sx * PX, 0, 0), 0.03, ropeMat));
+    }
     g.add(sway); scene.add(g);
-    play.hammock = { x: best.hx, z: best.hz, g, sway, amp: 0.02, want: 0.02, rider: false };
-    play.spots.push({ x: best.hx, z: best.hz, r: 1.5 }, { x: best.hx + Math.cos(g.rotation.y) * PX, z: best.hz - Math.sin(g.rotation.y) * PX, r: 0.6 }, { x: best.hx - Math.cos(g.rotation.y) * PX, z: best.hz + Math.sin(g.rotation.y) * PX, r: 0.6 });
+    play.hammock = { x: best.hx, z: best.hz, g, sway, amp: 0.02, want: 0.02, rider: false, drop: DROP };
+    play.spots.push({ x: best.hx, z: best.hz, r: 1.5 });
   }
 }
 function updatePlay(dt) {
