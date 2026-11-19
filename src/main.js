@@ -3,6 +3,7 @@ import * as CANNON from 'cannon-es';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
+import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { buildScenery, softTexture, R, START, TREES, WOODS, ROAM, hillHeight } from './scenery.js';
 import { sfx } from './audio.js';
 
@@ -64,11 +65,14 @@ function pickClips() {
   CLIP.win = find(/dance|cheer|victory/i);
   const t = find(/throw|cast|pitch/i);
   if (t) Object.assign(THROW, { clip: t, wind: 0, speed: 1.4, hold: Math.min(1.2, acts[t].getClip().duration / 1.4) });
+  else if (!acts[THROW.clip] && CLIP.jump) Object.assign(THROW, { clip: CLIP.jump, wind: HOP.t0, speed: 1.5, hold: 0.6 });   // no throw of her own: she hops as she lets go
+  if (!CLIP.win) CLIP.win = find(/laugh/i);
 }
 // The heroes to pick from. A mount has no clips: it gallops by rocking and bounding, and covers ground faster.
 const HEROES = [
   { file: 'general-animated.glb', scale: 2.5, turn: Math.PI, lift: 0, speed: 4.8, hand: 2.15, cam: 0 },
   { file: 'warrior.glb', scale: 4.4, turn: Math.PI, lift: 0.489, speed: 9.5, hand: 3.3, cam: 1, mount: true },
+  { file: 'kid.glb', scale: 1.9, turn: Math.PI, lift: 0, speed: 5.4, hand: 1.6, cam: -0.2 },   // a copy of the kid, made when her model loads
 ];
 let heroIx = 0, HERO = HEROES[heroIx], heroModel = null, heroLoads = 0;
 const heroCache = {};
@@ -139,6 +143,7 @@ const kid = { x: START.x + 7, z: START.z - 4, face: 0, group: new THREE.Group(),
     kid.model = m;
     kid.mixer = new THREE.AnimationMixer(m);
     for (const c of g.animations) kid.acts[c.name] = kid.mixer.clipAction(c);
+    const twin = cloneSkinned(m); twin.rotation.y = Math.PI; heroCache['kid.glb'] = { scene: twin, animations: g.animations };   // the one he can steer
     kid.group.add(m); kidPlay('idle');
   }, undefined, e => console.error('kid model failed to load', e));
 }
@@ -179,7 +184,7 @@ function kidGo(x, z, run) {
   kidPlay(run ? 'run' : Math.random() < 0.4 ? 'swagger' : 'walk', false, run ? 1.15 : 1);
 }
 function updateKid(dt, dtReal) {
-  if (!kid.mixer) return;
+  if (!kid.mixer || kid.away) return;
   kid.mixer.update(dtReal);
   if (kid.mode === 'ride') {
     kid.t -= dt; kidPose();
@@ -232,11 +237,40 @@ function updateKid(dt, dtReal) {
   for (const st of sites) out(st.x, st.z, 3.6);
   if (!kid.goal) for (const q of play.spots) out(q.x, q.z, q.r);                    // keeps clear of the towers
   out(npc.x, npc.z, npc.r); out(player.x, player.z, 1.0);
-  kid.group.position.set(kid.x, 0, kid.z);
+  kid.group.position.set(kid.x, hillHeight(kid.x, kid.z), kid.z);
   let dy = kid.face - kid.group.rotation.y; dy = Math.atan2(Math.sin(dy), Math.cos(dy));
   kid.group.rotation.y += dy * Math.min(1, dt * 10);
 }
 
+// Swapping who he steers. The one left behind stays in the world: the general stands where he was, the kid goes back to playing.
+const stand = { on: false, x: 0, z: 0, group: new THREE.Group(), mixer: null };
+stand.group.visible = false; scene.add(stand.group);
+function standStruck() {}
+function swapHero() {
+  const to = heroIx === 0 ? 2 : 0, g0 = heroCache[HEROES[0].file];
+  if (!g0 || !heroCache[HEROES[2].file] || state !== 'play' || player.y > 0.01 || aim.on) return false;
+  const px = player.x, pz = player.z;
+  if (to === 2) {
+    if (kid.ride) kidDismount();
+    setHero(2);
+    stand.x = px; stand.z = pz; stand.on = true; stand.group.visible = true;
+    stand.group.position.set(px, player.g, pz); stand.group.rotation.y = hero.rotation.y; stand.group.add(g0.scene);
+    stand.mixer = new THREE.AnimationMixer(g0.scene);
+    const c = g0.animations.find(c => /idle|breath|stand/i.test(c.name)) || g0.animations.find(c => /look/i.test(c.name)) || g0.animations[0];
+    if (c) stand.mixer.clipAction(c).play();
+    player.x = kid.x; player.z = kid.z; kid.away = true; kid.group.visible = false;
+  } else {
+    if (stand.mixer) stand.mixer.stopAllAction(); stand.mixer = null;
+    setHero(0);
+    stand.on = false; stand.group.visible = false;
+    kid.x = px; kid.z = pz; kid.face = Math.PI - player.face; kid.group.rotation.y = kid.face; kid.group.position.set(px, player.g, pz);
+    kid.away = false; kid.group.visible = true; kid.mode = 'wait'; kid.t = 1.2; kid.visit = false; kid.goal = null; kid.flee = null; kidPlay('idle');
+    player.x = stand.x; player.z = stand.z;
+  }
+  player.face = camYaw; hero.rotation.y = -player.face; camReady = false;
+  fireflies(player.x, hillHeight(player.x, player.z) + 1.4, player.z, 16);
+  return true;
+}
 function heroPlay(name, { fade = 0.25, once = false, speed = 1, at = null } = {}) {
   const a = acts[name]; if (!a) return;
   if (a !== heroAct) {
@@ -595,6 +629,7 @@ const elLvl = document.getElementById('lvl'), elLeft = document.getElementById('
   elJoy = document.getElementById('joy'), elKnob = document.getElementById('knob');
 if (localStorage.getItem('lanternfall.played')) elHint.classList.add('off');
 function hud() { elLvl.textContent = level; elLeft.textContent = lanterns.length; }
+document.getElementById('hero').addEventListener('click', e => { e.stopPropagation(); if (swapHero()) sfx.chime(2); });
 document.getElementById('restart').addEventListener('click', e => { e.stopPropagation(); transition(false); });
 function transition(next) {
   if (state === 'fade') return;
@@ -778,7 +813,7 @@ function physics(dt) {
         p.y = gh + BALL_R; if (v.y < 0) { if (v.y < -4) dust(p.x, gh + 0.1, p.z, 2); v.y *= -0.35; } v.x *= 0.9; v.z *= 0.9;
       }
       for (const t of TREES) ballTree(o, t.x, t.z, 0, t.s * 1.5);
-      ballBody(o, kid.x, kid.z, kid.ride ? 0.8 : 0.5, kid.ride ? 2.9 : 1.9, kidStruck); ballBody(o, npc.x, npc.z, 1.5, 4.3, npcStruck);
+      if (!kid.away) ballBody(o, kid.x, kid.z, kid.ride ? 0.8 : 0.5, kid.ride ? 2.9 : 1.9, kidStruck); if (stand.on) ballBody(o, stand.x, stand.z, 0.6, 2.3, standStruck); ballBody(o, npc.x, npc.z, 1.5, 4.3, npcStruck);
       if (Math.hypot(p.x, p.z) > R) for (const t of WOODS) ballTree(o, t.x, t.z, t.y, t.m);
       for (const b of beacons) if (!b.lit && Math.hypot(p.x - b.x, p.z - b.z) < 1.9 && p.y > b.h - 0.5 && p.y < b.h + 8) { lightBeacon(b); o.age = 99; }
     }
@@ -899,7 +934,7 @@ function movePlayer(dt) {
     if (dd < rad && dd > 1e-4) { player.x = ox + dx / dd * rad; player.z = oz + dz / dd * rad; }
   };
   for (const t of TREES) push(t.x, t.z, 0.7 * t.s + 0.6);
-  push(npc.x, npc.z, npc.r); if (!kid.ride) push(kid.x, kid.z, 0.9);
+  push(npc.x, npc.z, npc.r); if (!kid.ride && !kid.away) push(kid.x, kid.z, 0.9); if (stand.on) push(stand.x, stand.z, 1.1);
   for (const q of play.spots) push(q.x, q.z, q.r);
   if (d > R) for (const t of WOODS) push(t.x, t.z, t.r);
   player.g = hillHeight(player.x, player.z);
@@ -943,7 +978,7 @@ function step(dtReal) {
     if (npc.rear > 0) { npc.rear = Math.max(0, npc.rear - dt * 0.9); const k = Math.sin(npc.rear * Math.PI); npc.group.rotation.x = REAR * 0.38 * k; npc.group.position.y = 0.5 * k; }
   }
   updatePlay(dt);
-  updateKid(dt, dtReal);
+  updateKid(dt, dtReal); if (stand.mixer) stand.mixer.update(dtReal);
   updateHills(dt);
   physics(dt);
 
@@ -1011,7 +1046,7 @@ function frame(now) {
 // Scripted stepping for tests (the preview pane only runs frames while visible).
 window.game = {
   step(seconds = 1, dt = 1 / 60) { window.__manual = true; for (let t = 0; t < seconds; t += dt) step(dt); renderer.render(scene, camera); return this.state(); },
-  fling, jump, setHero, beacons, motes, lightBeacon, debug: { WOODS, npc, kid, play, KID_POSE, kidMount, kidDismount, scene, camera, hero, acts, THROW, THREE, player, sites, renderer, get mixer() { return mixer; } },
+  fling, jump, setHero, swapHero, beacons, motes, lightBeacon, debug: { WOODS, npc, kid, stand, play, KID_POSE, kidMount, kidDismount, scene, camera, hero, acts, THROW, THREE, player, sites, renderer, get mixer() { return mixer; } },
   walk(x, y) { window.__joy = x || y ? { x, y } : null; },
   setLevel(n) { level = n; buildLevel(); },
   setSeason(name) { scenery.setSeason(name); },
