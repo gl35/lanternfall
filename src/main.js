@@ -102,7 +102,9 @@ function setHero(i) {
 setHero(heroIx);
 
 // The rider waits at the meadow's edge and turns to watch him when he comes near.
-const npc = { x: 0, z: 0, r: 2.1, group: new THREE.Group(), face: 0 };
+const npc = { x: 0, z: 0, r: 2.1, group: new THREE.Group(), face: 0, rear: 0 };
+const REAR = 1;
+npc.group.rotation.order = 'YXZ';
 {
   let best = null;
   for (let k = 0; k < 40; k++) {                             // an open spot near the edge, away from trees and from where he starts
@@ -168,6 +170,10 @@ function updateKid(dt, dtReal) {
       kid.face += da * Math.min(1, dt * 7);
       kid.x += Math.sin(kid.face) * kid.speed * dt; kid.z += Math.cos(kid.face) * kid.speed * dt;
     }
+  } else if (kid.t <= 0 && kid.flee) {
+    const lim = R - 5; let x = kid.x + kid.flee.x * 14, z = kid.z + kid.flee.z * 14; const d = Math.hypot(x, z);
+    if (d > lim) { x *= lim / d; z *= lim / d; }
+    kid.flee = null; kidGo(x, z, true);
   } else if (kid.t <= 0) {                                         // off again
     if (inMeadow && toP > 6 && Math.random() < 0.3) { kid.visit = true; kidGo(player.x, player.z, true); }
     else {
@@ -623,6 +629,23 @@ function ballTree(o, tx, tz, ty, m) {
   }
   if (crown && cy > 0.2 && v.y < 0) v.y *= -0.3;             // dropped onto the top of it
 }
+// A fireball meets somebody standing in the field: it bursts in sparks and bounces off, and they notice.
+function ballBody(o, x, z, rad, top, hit) {
+  const p = o.body.position, v = o.body.velocity, dx = p.x - x, dz = p.z - z, hd = Math.hypot(dx, dz);
+  if (hd > rad + BALL_R || p.y > top + BALL_R || o.struck === hit) return;
+  o.struck = hit;                                            // one hit each per throw
+  const sp = Math.hypot(v.x, v.z) || 1, nx = -v.x / sp, nz = -v.z / sp;      // back the way it came
+  v.x *= -0.4; v.z *= -0.4; v.y = Math.max(v.y, 3);
+  fireflies(p.x, p.y, p.z, 14); dust(p.x, p.y, p.z, 3); sfx.thump(0.7); shake = Math.max(shake, 0.15);
+  hit(nx, nz);
+}
+function kidStruck(nx, nz) {                                 // yelps, tumbles, then bolts away from where it came from
+  if (!kid.mixer) return;
+  kid.act = kid.act === kid.acts.flip ? null : kid.act;
+  kid.mode = 'wait'; kid.visit = false; kid.t = Math.min(1.6, kidPlay('flip', true, 1.6)); kid.flee = { x: -nx, z: -nz };
+  sfx.chime(6);
+}
+function npcStruck() { npc.rear = 1; }
 function physics(dt) {
   acc += dt;
   let n = 0;
@@ -645,6 +668,7 @@ function physics(dt) {
         p.y = gh + BALL_R; if (v.y < 0) { if (v.y < -4) dust(p.x, gh + 0.1, p.z, 2); v.y *= -0.35; } v.x *= 0.9; v.z *= 0.9;
       }
       for (const t of TREES) ballTree(o, t.x, t.z, 0, t.s * 1.5);
+      ballBody(o, kid.x, kid.z, 0.45, 1.55, kidStruck); ballBody(o, npc.x, npc.z, 1.5, 4.3, npcStruck);
       if (Math.hypot(p.x, p.z) > R) for (const t of WOODS) ballTree(o, t.x, t.z, t.y, t.m);
       for (const b of beacons) if (!b.lit && Math.hypot(p.x - b.x, p.z - b.z) < 1.9 && p.y > b.h - 0.5 && p.y < b.h + 8) { lightBeacon(b); o.age = 99; }
     }
@@ -805,6 +829,7 @@ function step(dtReal) {
     const dx = player.x - npc.x, dz = player.z - npc.z, want = Math.hypot(dx, dz) < 16 ? Math.atan2(dx, dz) + Math.PI : npc.face;
     let da = want - npc.group.rotation.y; da = Math.atan2(Math.sin(da), Math.cos(da));
     npc.group.rotation.y += da * Math.min(1, dt * 1.6);
+    if (npc.rear > 0) { npc.rear = Math.max(0, npc.rear - dt * 0.9); const k = Math.sin(npc.rear * Math.PI); npc.group.rotation.x = REAR * 0.38 * k; npc.group.position.y = 0.5 * k; }
   }
   updateKid(dt, dtReal);
   updateHills(dt);
