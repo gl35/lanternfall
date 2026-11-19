@@ -184,7 +184,7 @@ function kidGo(x, z, run) {
   kidPlay(run ? 'run' : Math.random() < 0.4 ? 'swagger' : 'walk', false, run ? 1.15 : 1);
 }
 function updateKid(dt, dtReal) {
-  if (!kid.mixer || kid.away) return;
+  if (!kid.mixer || (kid.away && !player.ride)) return;
   kid.mixer.update(dtReal);
   if (kid.mode === 'ride') {
     kid.t -= dt; kidPose();
@@ -193,7 +193,7 @@ function updateKid(dt, dtReal) {
       for (const [n, deg] of [['LeftUpLeg', -22], ['RightUpLeg', -22], ['LeftLeg', 44], ['RightLeg', 44]]) { const b = kid.bones[n]; if (b) b.bone.quaternion.copy(b.bind).multiply(kidQ.setFromEuler(kidE.set(deg * dip * D2R, 0, 0))); }
       kid.group.position.y = -play.swing.L + 0.035 - 0.07 * dip;
     }
-    if (kid.t <= 0) kidDismount();
+    if (kid.t <= 0 && !player.ride) kidDismount();
     return;
   }
   const toP = Math.hypot(player.x - kid.x, player.z - kid.z), inMeadow = Math.hypot(player.x, player.z) < R;
@@ -246,7 +246,21 @@ function updateKid(dt, dtReal) {
 const stand = { on: false, x: 0, z: 0, group: new THREE.Group(), mixer: null };
 stand.group.visible = false; scene.add(stand.group);
 function standStruck() {}
+// Steering the kid, he can walk her onto the swing or into the hammock; pushing the stick again (or a jump) gets her off.
+function playerMount(kind) {
+  const e = play[kind];
+  player.ride = kind; player.rideFree = false; player.x = e.x; player.z = e.z; player.moving = 0;
+  hero.visible = false; kid.group.visible = true; kidMount(kind); sfx.chime(4);
+}
+function playerDismount() {
+  if (!player.ride) return;
+  player.rideLock = player.ride; player.ride = null;
+  kidDismount(); kid.mixer.stopAllAction(); kid.act = null; kid.group.visible = false;
+  player.x = kid.x; player.z = kid.z; player.face = Math.PI - kid.face; hero.rotation.y = -player.face; hero.visible = true;
+  player.vy = JUMP_V * 0.6; player.y = 0.01;                                      // hops down
+}
 function swapHero() {
+  playerDismount(); player.y = 0; player.vy = 0;
   const to = heroIx === 0 ? 2 : 0, g0 = heroCache[HEROES[0].file];
   if (!g0 || !heroCache[HEROES[2].file] || state !== 'play' || player.y > 0.01 || aim.on) return false;
   const px = player.x, pz = player.z;
@@ -618,6 +632,7 @@ function buildLevel() {
   });
   total = lanterns.length;
   scenery.setSeason(seasonFor(level));
+  playerDismount(); player.y = 0; player.vy = 0; player.rideLock = null;
   player.x = START.x; player.z = START.z; player.face = 0; camYaw = 0; camReady = false;
   state = 'play'; stateT = 0; combo = 0; cooldown = 0;
   hud();
@@ -900,6 +915,7 @@ function updateHills(dt) {
 }
 
 function jump() {
+  if (player.ride) { playerDismount(); return true; }
   if (state !== 'play' || player.y > 0.01) return false;
   player.vy = JUMP_V; player.y = 0.011; sfx.whoosh(0.1);
   return true;
@@ -917,6 +933,11 @@ function movePlayer(dt) {
   if (window.__joy) { jx = window.__joy.x; jy = window.__joy.y; }
   let l = Math.hypot(jx, jy); if (l > 1) { jx /= l; jy /= l; l = 1; }
   if (state !== 'play') l = jx = jy = 0;
+  if (player.ride) {
+    if (l < 0.12) player.rideFree = true;
+    else if (player.rideFree) playerDismount();
+    if (player.ride) { player.g = hillHeight(player.x, player.z); return; }
+  }
   player.moving += ((l > 0.12 ? l : 0) - player.moving) * Math.min(1, dt * 10);
   if (l > 0.12) {
     camYaw += jx * 1.15 * dt;                                // pushing sideways swings the view round as he walks
@@ -935,6 +956,11 @@ function movePlayer(dt) {
   };
   for (const t of TREES) push(t.x, t.z, 0.7 * t.s + 0.6);
   push(npc.x, npc.z, npc.r); if (!kid.ride && !kid.away) push(kid.x, kid.z, 0.9); if (stand.on) push(stand.x, stand.z, 1.1);
+  if (heroIx === 2 && player.y <= 0) for (const kind of ['swing', 'hammock']) {
+    const e = play[kind], dd = Math.hypot(player.x - e.x, player.z - e.z), rad = kind === 'swing' ? 1.7 : 1.5;
+    if (player.rideLock === kind) { if (dd > rad + 1.4) player.rideLock = null; }
+    else if (l > 0.12 && dd < rad + 0.3 && state === 'play' && !aim.on) { playerMount(kind); return; }
+  }
   for (const q of play.spots) push(q.x, q.z, q.r);
   if (d > R) for (const t of WOODS) push(t.x, t.z, t.r);
   player.g = hillHeight(player.x, player.z);
