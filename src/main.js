@@ -125,7 +125,7 @@ npc.group.rotation.order = 'YXZ';
 }
 // A kid at play in the meadow: dashes somewhere, stops, laughs, turns a flip, hops, wanders off again -
 // and every so often runs over to see what he is doing.
-const kid = { x: START.x + 7, z: START.z - 4, face: 0, group: new THREE.Group(), mixer: null, acts: {}, act: null, mode: 'wait', t: 1, tx: 0, tz: 0, speed: 0, visit: false };
+const kid = { x: START.x + 7, z: START.z - 4, face: 0, group: new THREE.Group(), mixer: null, acts: {}, act: null, mode: 'wait', t: 1, tx: 0, tz: 0, speed: 0, visit: false, goal: null, ride: null, bones: {}, pose: null };
 {
   kid.group.position.set(kid.x, 0, kid.z); scene.add(kid.group);
   new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).load(import.meta.env.BASE_URL + 'models/kid.glb', g => {
@@ -135,6 +135,8 @@ const kid = { x: START.x + 7, z: START.z - 4, face: 0, group: new THREE.Group(),
       if (!/Hips\.position$/.test(t.name)) continue;
       for (let i = 0; i < t.values.length; i += 3) { t.values[i] = t.values[0]; t.values[i + 2] = t.values[2]; }
     }
+    m.traverse(o => { if (o.isBone) kid.bones[o.name.replace(/^mixamorig:?/, '')] = { bone: o, bind: o.quaternion.clone() }; });
+    kid.model = m;
     kid.mixer = new THREE.AnimationMixer(m);
     for (const c of g.animations) kid.acts[c.name] = kid.mixer.clipAction(c);
     kid.group.add(m); kidPlay('idle');
@@ -146,6 +148,32 @@ function kidPlay(name, once = false, speed = 1) {
   a.fadeIn(0.2).play(); if (kid.act) kid.act.fadeOut(0.2); kid.act = a;
   return a.getClip().duration / speed;
 }
+// Poses the clips don't have, as turns (in degrees) added to each bone's rest pose.
+const KID_POSE = {
+  sit: { LeftUpLeg: [-88, 0, 4], RightUpLeg: [-88, 0, -4], LeftLeg: [86, 0, 0], RightLeg: [86, 0, 0], LeftArm: [52, 0, 0], RightArm: [52, 0, 0] },      // hands up on the ropes
+  lie: { LeftArm: [-72, 0, 0], RightArm: [-72, 0, 0] },                                                                            // arms by the sides
+};
+const kidE = new THREE.Euler(), kidQ = new THREE.Quaternion(), D2R = Math.PI / 180;
+function kidPose() {
+  for (const n in kid.pose) { const b = kid.bones[n]; if (!b) continue; const [x, y, z] = kid.pose[n]; b.bone.quaternion.copy(b.bind).multiply(kidQ.setFromEuler(kidE.set(x * D2R, y * D2R, z * D2R))); }
+}
+function kidMount(kind) {
+  const e = play[kind]; kid.ride = kind; kid.mode = 'ride'; kid.t = 9 + Math.random() * 8; kid.goal = null; e.rider = true;
+  kid.mixer.stopAllAction(); kid.act = null; kid.x = e.x; kid.z = e.z;
+  const g = kid.group; g.rotation.set(0, 0, 0);
+  if (kind === 'swing') { e.pivot.add(g); g.position.set(0, -e.L - 0.78, -0.04); kid.pose = KID_POSE.sit; e.want = 0.62; }
+  else { e.sway.add(g); g.rotation.order = 'YXZ'; g.rotation.set(-Math.PI / 2, Math.PI / 2, 0); g.position.set(0.78, -0.5, 0); kid.pose = KID_POSE.lie; e.want = 0.13; }
+}
+function kidDismount() {
+  const e = play[kid.ride]; if (!e) return;
+  e.rider = false; e.want = kid.ride === 'swing' ? 0.05 : 0.02;
+  const a = e.g.rotation.y + (kid.ride === 'swing' ? 0 : Math.PI / 2);
+  kid.x = e.x + Math.sin(a) * 1.9; kid.z = e.z + Math.cos(a) * 1.9; kid.face = a;
+  for (const n in kid.pose) { const b = kid.bones[n]; if (b) b.bone.quaternion.copy(b.bind); }
+  kid.pose = null; kid.ride = null; scene.add(kid.group);
+  kid.group.rotation.order = 'XYZ'; kid.group.rotation.set(0, a, 0); kid.group.position.set(kid.x, 0, kid.z);
+  kid.mode = 'wait'; kid.t = Math.min(1.4, kidPlay('jump', true, 1.3));
+}
 function kidGo(x, z, run) {
   kid.tx = x; kid.tz = z; kid.mode = 'go'; kid.t = 9; kid.speed = run ? 5.6 : 1.5;
   kidPlay(run ? 'run' : Math.random() < 0.4 ? 'swagger' : 'walk', false, run ? 1.15 : 1);
@@ -153,11 +181,22 @@ function kidGo(x, z, run) {
 function updateKid(dt, dtReal) {
   if (!kid.mixer) return;
   kid.mixer.update(dtReal);
+  if (kid.mode === 'ride') {
+    kid.t -= dt; kidPose();
+    if (kid.ride === 'swing') {                                    // legs pump with the swing
+      const ph = Math.sin(time * 2.06), k = kid.bones.LeftLeg && play.swing.amp / 0.62;
+      for (const n of ['LeftLeg', 'RightLeg']) { const b = kid.bones[n]; if (b) b.bone.quaternion.copy(b.bind).multiply(kidQ.setFromEuler(kidE.set((86 - 55 * k * (0.5 + 0.5 * ph)) * D2R, 0, 0))); }
+    }
+    if (kid.t <= 0) kidDismount();
+    return;
+  }
   const toP = Math.hypot(player.x - kid.x, player.z - kid.z), inMeadow = Math.hypot(player.x, player.z) < R;
   kid.t -= dt;
   if (kid.mode === 'go') {
     const dx = kid.tx - kid.x, dz = kid.tz - kid.z, d = Math.hypot(dx, dz);
+    if (kid.goal && d < 1.0) { kidMount(kid.goal); return; }
     if (d < 0.5 || kid.t <= 0 || (kid.visit && toP < 3.2)) {       // there: now do something
+      kid.goal = null;
       const pick = Math.random(), near = kid.visit || toP < 7; kid.visit = false; kid.mode = 'wait';
       if (near) kid.face = Math.atan2(player.x - kid.x, player.z - kid.z);
       if (pick < 0.3) kid.t = Math.min(3.5, kidPlay('laugh_01', true));
@@ -175,7 +214,11 @@ function updateKid(dt, dtReal) {
     if (d > lim) { x *= lim / d; z *= lim / d; }
     kid.flee = null; kidGo(x, z, true);
   } else if (kid.t <= 0) {                                         // off again
-    if (inMeadow && toP > 6 && Math.random() < 0.3) { kid.visit = true; kidGo(player.x, player.z, true); }
+    if (Math.random() < 0.3) {                                      // to the swing or the hammock
+      const kind = Math.random() < 0.6 ? 'swing' : 'hammock', e = play[kind], a = e.g.rotation.y + (kind === 'swing' ? Math.PI : Math.PI / 2);
+      kidGo(e.x + Math.sin(a) * 1.9, e.z + Math.cos(a) * 1.9, true); kid.goal = kind;
+    }
+    else if (inMeadow && toP > 6 && Math.random() < 0.3) { kid.visit = true; kidGo(player.x, player.z, true); }
     else {
       const a = Math.random() * 6.283, far = Math.random() < 0.65, rad = far ? 6 + Math.random() * 14 : 2 + Math.random() * 4;
       let x = kid.x + Math.cos(a) * rad, z = kid.z + Math.sin(a) * rad; const d = Math.hypot(x, z), lim = R - 5;
@@ -185,7 +228,8 @@ function updateKid(dt, dtReal) {
   }
   const out = (ox, oz, rad) => { const dx = kid.x - ox, dz = kid.z - oz, dd = Math.hypot(dx, dz); if (dd < rad && dd > 1e-4) { kid.x = ox + dx / dd * rad; kid.z = oz + dz / dd * rad; } };
   for (const t of TREES) out(t.x, t.z, 0.7 * t.s + 0.5);
-  for (const st of sites) out(st.x, st.z, 3.6);                    // keeps clear of the towers
+  for (const st of sites) out(st.x, st.z, 3.6);
+  if (!kid.goal) for (const q of play.spots) out(q.x, q.z, q.r);                    // keeps clear of the towers
   out(npc.x, npc.z, npc.r); out(player.x, player.z, 1.0);
   kid.group.position.set(kid.x, 0, kid.z);
   let dy = kid.face - kid.group.rotation.y; dy = Math.atan2(Math.sin(dy), Math.cos(dy));
@@ -449,6 +493,67 @@ const forcedSeason = new URLSearchParams(location.search).get('season');
 const seasonFor = () => forcedSeason || 'summer';   // summer only for now; winter is parked behind ?season=winter
 let level = Math.max(1, parseInt(localStorage.getItem('lanternfall.level') || '1', 10) || 1);
 let state = 'play', stateT = 0, combo = 0, comboT = 0, total = 0, cooldown = 0, camReady = false;
+// ---------- the kid's corner: a swing and a hammock ----------
+const play = { swing: null, hammock: null, spots: [] };
+{
+  const ropeMat = new THREE.MeshStandardMaterial({ color: 0xe9dcb8, roughness: 1 }), UP = new THREE.Vector3(0, 1, 0), V = (x, y, z) => new THREE.Vector3(x, y, z);
+  const bar = (a, b, r, mat) => {                           // a round pole from a to b
+    const m = new THREE.Mesh(new THREE.CylinderGeometry(r, r, a.distanceTo(b), 12), mat); m.castShadow = m.receiveShadow = true;
+    m.position.copy(a).add(b).multiplyScalar(0.5); m.quaternion.setFromUnitVectors(UP, b.clone().sub(a).normalize()); return m;
+  };
+  const knob = (p, r, mat) => { const m = new THREE.Mesh(sphereGeo, mat); m.scale.setScalar(r); m.position.copy(p); m.castShadow = true; return m; };
+  // two open spots side by side, as near to where he starts as the trees and first tower allow
+  const ok = (x, z) => Math.hypot(x, z) < R - 7 && TREES.every(t => Math.hypot(t.x - x, t.z - z) > 5.5) && Math.hypot(x - START.x, z - START.z) > 8
+    && Math.hypot(x - START.x, z - START.z + 11) > 10 && Math.hypot(x - npc.x, z - npc.z) > 7;
+  let best = null;
+  for (let x = -R; x <= R; x += 1.5) for (let z = -R; z <= R; z += 1.5) for (let a = 0; a < 6.2; a += 0.52) {
+    const hx = x + Math.cos(a) * 7.5, hz = z + Math.sin(a) * 7.5, d = Math.hypot(x - START.x, z - START.z) + Math.hypot(hx - START.x, hz - START.z);
+    if (ok(x, z) && ok(hx, hz) && (!best || d < best.d)) best = { x, z, hx, hz, d };
+  }
+  if (!best) best = { x: -14, z: 14, hx: -20, hz: 9 };
+  const face = (x, z) => Math.atan2(START.x - x, START.z - z);
+
+  // the swing: an A-frame of poles, two ropes and a plank
+  {
+    const g = new THREE.Group(); g.position.set(best.x, 0, best.z); g.rotation.y = face(best.x, best.z) + 0.5;
+    const H = 3.05, L = 2.15;
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) g.add(bar(V(sx * 1.45, -0.1, sz * 1.15), V(sx * 1.22, H + 0.12, -sz * 0.07), 0.075, MAT.wood));
+    g.add(bar(V(-1.5, H, 0), V(1.5, H, 0), 0.085, MAT.dark), knob(V(-1.5, H, 0), 0.12, MAT.dark), knob(V(1.5, H, 0), 0.12, MAT.dark));
+    const pivot = new THREE.Group(); pivot.position.y = H;
+    for (const sx of [-1, 1]) pivot.add(bar(V(sx * 0.44, 0, 0), V(sx * 0.44, -L, 0), 0.022, ropeMat));
+    const seat = new THREE.Mesh(new RoundedBoxGeometry(1.06, 0.07, 0.3, 3, 0.03), MAT.dark); seat.position.y = -L; seat.castShadow = true; pivot.add(seat);
+    g.add(pivot); scene.add(g);
+    play.swing = { x: best.x, z: best.z, g, pivot, amp: 0.05, want: 0.05, L, rider: false };
+    play.spots.push({ x: best.x, z: best.z, r: 1.7 });
+  }
+  // the hammock: striped cloth slung between two posts
+  {
+    const g = new THREE.Group(); g.position.set(best.hx, 0, best.hz); g.rotation.y = face(best.hx, best.hz) + 1.2;
+    const PX = 2.05, PH = 1.5, HL = 1.35;
+    for (const sx of [-1, 1]) g.add(bar(V(sx * (PX - 0.12), -0.1, 0), V(sx * PX, PH, 0), 0.085, MAT.wood), knob(V(sx * PX, PH, 0), 0.11, MAT.dark));
+    const sway = new THREE.Group(); sway.position.y = PH - 0.08;
+    const geo = new THREE.PlaneGeometry(HL * 2, 1, 28, 10), p = geo.attributes.position, col = [], c = new THREE.Color();
+    for (let i = 0; i < p.count; i++) {
+      const u = p.getX(i) / HL, v = p.getY(i), k = 1 - u * u;
+      p.setXYZ(i, u * HL, -0.62 * (1 - u * u * u * u) + 1.5 * v * v * (0.35 + 0.65 * k), v * (0.3 + 0.75 * Math.sqrt(Math.max(0, k)) ) * 1.05);
+      c.set(Math.floor((v + 0.5) * 6.999) % 2 ? 0xf3ead2 : 0xd9503a); col.push(c.r, c.g, c.b);
+    }
+    geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3)); geo.computeVertexNormals();
+    const cloth = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ vertexColors: true, side: THREE.DoubleSide, roughness: 0.95 })); cloth.castShadow = cloth.receiveShadow = true;
+    sway.add(cloth);
+    for (const sx of [-1, 1]) for (const z of [-0.3, 0, 0.3]) sway.add(bar(V(sx * HL, 0, z), V(sx * (PX - 0.02), 0.06, 0), 0.014, ropeMat));
+    g.add(sway); scene.add(g);
+    play.hammock = { x: best.hx, z: best.hz, g, sway, amp: 0.02, want: 0.02, rider: false };
+    play.spots.push({ x: best.hx, z: best.hz, r: 1.5 }, { x: best.hx + Math.cos(g.rotation.y) * PX, z: best.hz - Math.sin(g.rotation.y) * PX, r: 0.6 }, { x: best.hx - Math.cos(g.rotation.y) * PX, z: best.hz + Math.sin(g.rotation.y) * PX, r: 0.6 });
+  }
+}
+function updatePlay(dt) {
+  const sw = play.swing, hm = play.hammock;
+  sw.amp += (sw.want - sw.amp) * Math.min(1, dt * 0.7); hm.amp += (hm.want - hm.amp) * Math.min(1, dt * 0.8);
+  sw.pivot.rotation.x = Math.sin(time * 2.06) * sw.amp;
+  hm.sway.rotation.x = Math.sin(time * 1.5) * hm.amp;
+}
+
 const sites = [];
 
 function clearLevel() {
@@ -465,6 +570,7 @@ function buildLevel() {
     if (Math.hypot(x - START.x, z - START.z) < 9) continue;
     if (sites.some(s => Math.hypot(s.x - x, s.z - z) < 10)) continue;
     if (TREES.some(t => Math.hypot(t.x - x, t.z - z) < 5)) continue;
+    if (play.spots.some(p => Math.hypot(p.x - x, p.z - z) < 6.5)) continue;
     sites.push({ x, z });
   }
   sites.forEach((s, i) => {
@@ -641,6 +747,8 @@ function ballBody(o, x, z, rad, top, hit) {
 }
 function kidStruck(nx, nz) {                                 // yelps, tumbles, then bolts away from where it came from
   if (!kid.mixer) return;
+  if (kid.ride) kidDismount();
+  kid.goal = null;
   kid.act = kid.act === kid.acts.flip ? null : kid.act;
   kid.mode = 'wait'; kid.visit = false; kid.t = Math.min(1.6, kidPlay('flip', true, 1.6)); kid.flee = { x: -nx, z: -nz };
   sfx.chime(6);
@@ -668,7 +776,7 @@ function physics(dt) {
         p.y = gh + BALL_R; if (v.y < 0) { if (v.y < -4) dust(p.x, gh + 0.1, p.z, 2); v.y *= -0.35; } v.x *= 0.9; v.z *= 0.9;
       }
       for (const t of TREES) ballTree(o, t.x, t.z, 0, t.s * 1.5);
-      ballBody(o, kid.x, kid.z, 0.45, 1.55, kidStruck); ballBody(o, npc.x, npc.z, 1.5, 4.3, npcStruck);
+      ballBody(o, kid.x, kid.z, kid.ride ? 0.8 : 0.45, kid.ride ? 2.2 : 1.55, kidStruck); ballBody(o, npc.x, npc.z, 1.5, 4.3, npcStruck);
       if (Math.hypot(p.x, p.z) > R) for (const t of WOODS) ballTree(o, t.x, t.z, t.y, t.m);
       for (const b of beacons) if (!b.lit && Math.hypot(p.x - b.x, p.z - b.z) < 1.9 && p.y > b.h - 0.5 && p.y < b.h + 8) { lightBeacon(b); o.age = 99; }
     }
@@ -789,7 +897,8 @@ function movePlayer(dt) {
     if (dd < rad && dd > 1e-4) { player.x = ox + dx / dd * rad; player.z = oz + dz / dd * rad; }
   };
   for (const t of TREES) push(t.x, t.z, 0.7 * t.s + 0.6);
-  push(npc.x, npc.z, npc.r); push(kid.x, kid.z, 0.9);
+  push(npc.x, npc.z, npc.r); if (!kid.ride) push(kid.x, kid.z, 0.9);
+  for (const q of play.spots) push(q.x, q.z, q.r);
   if (d > R) for (const t of WOODS) push(t.x, t.z, t.r);
   player.g = hillHeight(player.x, player.z);
   for (const o of objs) if (o.kind !== 'ball' && o.body.position.y < 2.4 + player.y && o.body.position.y > player.y - 0.5) push(o.body.position.x, o.body.position.z, 1.0);
@@ -831,6 +940,7 @@ function step(dtReal) {
     npc.group.rotation.y += da * Math.min(1, dt * 1.6);
     if (npc.rear > 0) { npc.rear = Math.max(0, npc.rear - dt * 0.9); const k = Math.sin(npc.rear * Math.PI); npc.group.rotation.x = REAR * 0.38 * k; npc.group.position.y = 0.5 * k; }
   }
+  updatePlay(dt);
   updateKid(dt, dtReal);
   updateHills(dt);
   physics(dt);
@@ -899,7 +1009,7 @@ function frame(now) {
 // Scripted stepping for tests (the preview pane only runs frames while visible).
 window.game = {
   step(seconds = 1, dt = 1 / 60) { window.__manual = true; for (let t = 0; t < seconds; t += dt) step(dt); renderer.render(scene, camera); return this.state(); },
-  fling, jump, setHero, beacons, motes, lightBeacon, debug: { WOODS, npc, kid, scene, camera, hero, acts, THROW, THREE, player, sites, renderer, get mixer() { return mixer; } },
+  fling, jump, setHero, beacons, motes, lightBeacon, debug: { WOODS, npc, kid, play, KID_POSE, kidMount, kidDismount, scene, camera, hero, acts, THROW, THREE, player, sites, renderer, get mixer() { return mixer; } },
   walk(x, y) { window.__joy = x || y ? { x, y } : null; },
   setLevel(n) { level = n; buildLevel(); },
   setSeason(name) { scenery.setSeason(name); },
