@@ -92,7 +92,9 @@ function setHero(i) {
     pickClips(); heroModel = g.scene; heroTilt.add(heroModel); heroLoaded = true;
   };
   if (heroCache[HERO.file]) return show(heroCache[HERO.file]);
-  const H = HERO;
+  loadHero(HERO, show);
+}
+function loadHero(H, show) {
   new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).load(import.meta.env.BASE_URL + 'models/' + H.file, g => {
     g.scene.scale.setScalar(H.scale); g.scene.rotation.y = H.turn; g.scene.position.y = H.lift * H.scale;   // turned to face "forward", feet on the ground
     g.scene.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } if (o.isSkinnedMesh) o.frustumCulled = false; });
@@ -100,10 +102,12 @@ function setHero(i) {
       if (!/Hips\.position$/.test(t.name)) continue;
       for (let i = 0; i < t.values.length; i += 3) { t.values[i] = t.values[0]; t.values[i + 2] = t.values[2]; }
     }
-    heroCache[H.file] = g; show(g);
+    if (H.mount) { g.scene.position.y = 0; g.scene.updateMatrixWorld(true); g.scene.position.y = -new THREE.Box3().setFromObject(g.scene, true).min.y; }   // hooves on the grass
+    heroCache[H.file] = g; if (show) show(g);
   }, undefined, e => console.error('character model failed to load', e));
 }
 setHero(heroIx);
+loadHero(HEROES[1]);
 
 // The rider waits at the meadow's edge and turns to watch him when he comes near.
 const npc = { x: 0, z: 0, r: 2.1, group: new THREE.Group(), face: 0, rear: 0 };
@@ -124,7 +128,7 @@ npc.group.rotation.order = 'YXZ';
     m.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } if (o.isSkinnedMesh) o.frustumCulled = false; });
     m.updateMatrixWorld(true);
     m.position.y = -new THREE.Box3().setFromObject(m, true).min.y;       // hooves on the grass, measured from the model itself
-    npc.group.add(m);
+    npc.group.add(m); npc.loaded = true;
   }, undefined, e => console.error('rider model failed to load', e));
 }
 // A kid at play in the meadow: dashes somewhere, stops, laughs, turns a flip, hops, wanders off again -
@@ -236,7 +240,7 @@ function updateKid(dt, dtReal) {
   for (const t of TREES) out(t.x, t.z, 0.7 * t.s + 0.5);
   for (const st of sites) out(st.x, st.z, 3.6);
   if (!kid.goal) for (const q of play.spots) out(q.x, q.z, q.r);                    // keeps clear of the towers
-  out(npc.x, npc.z, npc.r); out(player.x, player.z, 1.0);
+  if (!npc.away) out(npc.x, npc.z, npc.r); out(player.x, player.z, HERO.mount ? 2.1 : 1.0);
   kid.group.position.set(kid.x, hillHeight(kid.x, kid.z), kid.z);
   let dy = kid.face - kid.group.rotation.y; dy = Math.atan2(Math.sin(dy), Math.cos(dy));
   kid.group.rotation.y += dy * Math.min(1, dt * 10);
@@ -259,28 +263,33 @@ function playerDismount() {
   player.x = kid.x; player.z = kid.z; player.face = Math.PI - kid.face; hero.rotation.y = -player.face; hero.visible = true;
   player.vy = JUMP_V * 0.6; player.y = 0.01;                                      // hops down
 }
+const SWAP = [0, 2, 1];                                     // the general, then the kid, then the rider
 function swapHero() {
   playerDismount(); player.y = 0; player.vy = 0;
-  const to = heroIx === 0 ? 2 : 0, g0 = heroCache[HEROES[0].file];
-  if (!g0 || !heroCache[HEROES[2].file] || state !== 'play' || player.y > 0.01 || aim.on) return false;
-  const px = player.x, pz = player.z;
-  if (to === 2) {
-    if (kid.ride) kidDismount();
-    setHero(2);
+  const from = heroIx, to = SWAP[(SWAP.indexOf(heroIx) + 1) % SWAP.length], g0 = heroCache[HEROES[0].file];
+  if (HEROES.some(h => !heroCache[h.file]) || !kid.mixer || !npc.loaded || state !== 'play' || aim.on) return false;
+  const px = player.x, pz = player.z, py = player.g, ry = hero.rotation.y;
+  if (to === 2 && kid.ride) kidDismount();
+  if (to === 0 && stand.mixer) { stand.mixer.stopAllAction(); stand.mixer = null; }
+  setHero(to);
+  // whoever he was is left standing where he stood
+  if (from === 0) {
     stand.x = px; stand.z = pz; stand.on = true; stand.group.visible = true;
-    stand.group.position.set(px, player.g, pz); stand.group.rotation.y = hero.rotation.y; stand.group.add(g0.scene);
+    stand.group.position.set(px, py, pz); stand.group.rotation.y = ry; stand.group.add(g0.scene);
     stand.mixer = new THREE.AnimationMixer(g0.scene);
     const c = g0.animations.find(c => /idle|breath|stand/i.test(c.name)) || g0.animations.find(c => /look/i.test(c.name)) || g0.animations[0];
     if (c) stand.mixer.clipAction(c).play();
-    player.x = kid.x; player.z = kid.z; kid.away = true; kid.group.visible = false;
-  } else {
-    if (stand.mixer) stand.mixer.stopAllAction(); stand.mixer = null;
-    setHero(0);
-    stand.on = false; stand.group.visible = false;
-    kid.x = px; kid.z = pz; kid.face = Math.PI - player.face; kid.group.rotation.y = kid.face; kid.group.position.set(px, player.g, pz);
+  } else if (from === 2) {
+    kid.x = px; kid.z = pz; kid.face = Math.PI - player.face; kid.group.rotation.y = kid.face; kid.group.position.set(px, py, pz);
     kid.away = false; kid.group.visible = true; kid.mode = 'wait'; kid.t = 1.2; kid.visit = false; kid.goal = null; kid.flee = null; kidPlay('idle');
-    player.x = stand.x; player.z = stand.z;
+  } else {
+    npc.x = px; npc.z = pz; npc.gy = py; npc.face = ry; npc.rear = 0; npc.group.position.set(px, py, pz); npc.group.rotation.set(0, ry, 0);
+    npc.away = false; npc.group.visible = true;
   }
+  // and he takes over the next one where they are
+  if (to === 0) { player.x = stand.x; player.z = stand.z; stand.on = false; stand.group.visible = false; }
+  else if (to === 2) { player.x = kid.x; player.z = kid.z; kid.away = true; kid.group.visible = false; }
+  else { player.x = npc.x; player.z = npc.z; npc.away = true; npc.group.visible = false; }
   player.face = camYaw; hero.rotation.y = -player.face; camReady = false;
   fireflies(player.x, hillHeight(player.x, player.z) + 1.4, player.z, 16);
   return true;
@@ -840,7 +849,7 @@ function physics(dt) {
         p.y = gh + BALL_R; if (v.y < 0) { if (v.y < -4) dust(p.x, gh + 0.1, p.z, 2); v.y *= -0.35; } v.x *= 0.9; v.z *= 0.9;
       }
       for (const t of TREES) ballTree(o, t.x, t.z, 0, t.s * 1.5);
-      if (!kid.away) ballBody(o, kid.x, kid.z, kid.ride ? 0.8 : 0.5, kid.ride ? 2.9 : 1.9, kidStruck); if (stand.on) ballBody(o, stand.x, stand.z, 0.6, 2.3, standStruck); ballBody(o, npc.x, npc.z, 1.5, 4.3, npcStruck);
+      if (!kid.away) ballBody(o, kid.x, kid.z, kid.ride ? 0.8 : 0.5, kid.ride ? 2.9 : 1.9, kidStruck); if (stand.on) ballBody(o, stand.x, stand.z, 0.6, 2.3, standStruck); if (!npc.away) ballBody(o, npc.x, npc.z, 1.5, 4.3, npcStruck);
       if (Math.hypot(p.x, p.z) > R) for (const t of WOODS) ballTree(o, t.x, t.z, t.y, t.m);
       for (const b of beacons) if (!b.lit && Math.hypot(p.x - b.x, p.z - b.z) < 1.9 && p.y > b.h - 0.5 && p.y < b.h + 8) { lightBeacon(b); o.age = 99; }
     }
@@ -967,7 +976,7 @@ function movePlayer(dt) {
     if (dd < rad && dd > 1e-4) { player.x = ox + dx / dd * rad; player.z = oz + dz / dd * rad; }
   };
   for (const t of TREES) push(t.x, t.z, 0.7 * t.s + 0.6);
-  push(npc.x, npc.z, npc.r); if (!kid.ride && !kid.away) push(kid.x, kid.z, 0.9); if (stand.on) push(stand.x, stand.z, 1.1);
+  if (!npc.away) push(npc.x, npc.z, npc.r + (HERO.mount ? 1 : 0)); if (!kid.ride && !kid.away) push(kid.x, kid.z, 0.9); if (stand.on) push(stand.x, stand.z, 1.1);
   if (heroIx === 2 && player.y <= 0) for (const kind of ['swing', 'hammock']) {
     const e = play[kind], dd = Math.hypot(player.x - e.x, player.z - e.z), rad = kind === 'swing' ? 1.7 : 1.5;
     if (player.rideLock === kind) { if (dd > rad + 1.4) player.rideLock = null; }
@@ -1009,11 +1018,11 @@ function step(dtReal) {
 
   FIRE_T.value = time;
   movePlayer(dt);
-  {                                                          // the rider looks his way when he is close
+  if (!npc.away) {                                           // the rider looks his way when he is close
     const dx = player.x - npc.x, dz = player.z - npc.z, want = Math.hypot(dx, dz) < 16 ? Math.atan2(dx, dz) + Math.PI : npc.face;
     let da = want - npc.group.rotation.y; da = Math.atan2(Math.sin(da), Math.cos(da));
     npc.group.rotation.y += da * Math.min(1, dt * 1.6);
-    if (npc.rear > 0) { npc.rear = Math.max(0, npc.rear - dt * 0.9); const k = Math.sin(npc.rear * Math.PI); npc.group.rotation.x = REAR * 0.38 * k; npc.group.position.y = 0.5 * k; }
+    if (npc.rear > 0) { npc.rear = Math.max(0, npc.rear - dt * 0.9); const k = Math.sin(npc.rear * Math.PI); npc.group.rotation.x = REAR * 0.38 * k; npc.group.position.y = (npc.gy || 0) + 0.5 * k; }
   }
   updatePlay(dt);
   updateKid(dt, dtReal); if (stand.mixer) stand.mixer.update(dtReal);
