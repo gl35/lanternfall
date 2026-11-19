@@ -70,11 +70,10 @@ const HEROES = [
   { file: 'general-animated.glb', scale: 2.5, turn: Math.PI, lift: 0, speed: 4.8, hand: 2.15, cam: 0 },
   { file: 'warrior.glb', scale: 4.4, turn: Math.PI, lift: 0.489, speed: 9.5, hand: 3.3, cam: 1, mount: true },
 ];
-let heroIx = Math.min(HEROES.length - 1, Math.max(0, +(localStorage.getItem('lf-hero') || 0) | 0)), HERO = HEROES[heroIx], heroModel = null, heroLoads = 0;
+let heroIx = 0, HERO = HEROES[heroIx], heroModel = null, heroLoads = 0;
 const heroCache = {};
 function setHero(i) {
   heroIx = (i + HEROES.length) % HEROES.length; HERO = HEROES[heroIx];
-  try { localStorage.setItem('lf-hero', heroIx); } catch (e) { /* private mode */ }
   SPEED = HERO.speed; HAND_H = HERO.hand;
   const want = ++heroLoads, show = g => {
     if (want !== heroLoads) return;                                // he picked another one meanwhile
@@ -101,6 +100,27 @@ function setHero(i) {
   }, undefined, e => console.error('character model failed to load', e));
 }
 setHero(heroIx);
+
+// The rider waits at the meadow's edge and turns to watch him when he comes near.
+const npc = { x: 0, z: 0, r: 2.1, group: new THREE.Group(), face: 0 };
+{
+  let best = null;
+  for (let k = 0; k < 40; k++) {                             // an open spot near the edge, away from trees and from where he starts
+    const a = 0.9 + k * 0.37, x = Math.cos(a) * (R - 6), z = Math.sin(a) * (R - 6);
+    const room = Math.min(...TREES.map(t => Math.hypot(t.x - x, t.z - z)), Math.hypot(x - START.x, z - START.z) - 6);
+    if (!best || room > best.room) best = { x, z, room };
+    if (room > 9) break;
+  }
+  npc.x = best.x; npc.z = best.z; npc.face = Math.atan2(-best.x, -best.z) + Math.PI;
+  npc.group.position.set(npc.x, 0, npc.z); npc.group.rotation.y = npc.face; scene.add(npc.group);
+  new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).load(import.meta.env.BASE_URL + 'models/warrior.glb', g => {
+    const m = g.scene; m.scale.setScalar(4.4); m.rotation.y = Math.PI;
+    m.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } if (o.isSkinnedMesh) o.frustumCulled = false; });
+    m.updateMatrixWorld(true);
+    m.position.y = -new THREE.Box3().setFromObject(m, true).min.y;       // hooves on the grass, measured from the model itself
+    npc.group.add(m);
+  }, undefined, e => console.error('rider model failed to load', e));
+}
 function heroPlay(name, { fade = 0.25, once = false, speed = 1, at = null } = {}) {
   const a = acts[name]; if (!a) return;
   if (a !== heroAct) {
@@ -212,7 +232,8 @@ function flameMaterial(w, h, seed, base = 0, heat = 1) {
 function flame(w, h, seed, base, heat) {
   const m = new THREE.Mesh(flameGeo, flameMaterial(w, h, seed, base, heat)); m.frustumCulled = false; m.renderOrder = 3; return m;
 }
-const ballFlameMat = [flameMaterial(3.4, 4.6, 0.3, 0.3, 1.15), flameMaterial(2.3, 3.2, 0.7, 0.3, 1.3)];
+const ballFlameMat = [flameMaterial(3.6, 5.0, 0.3, 0.26, 1.1), flameMaterial(2.6, 3.6, 0.7, 0.26, 1.3), flameMaterial(1.7, 2.3, 0.1, 0.28, 1.7)];
+const noBall = new THREE.MeshBasicMaterial({ visible: false });   // the ball itself is never drawn
 function ballFlames(mesh) {                                  // fire wrapped round a thrown ball: a wide back flame and a hotter inner one
   for (const mat of ballFlameMat) { const m = new THREE.Mesh(flameGeo, mat); m.frustumCulled = false; m.renderOrder = 3; mesh.add(m); }
 }
@@ -396,7 +417,6 @@ const elLvl = document.getElementById('lvl'), elLeft = document.getElementById('
 if (localStorage.getItem('lanternfall.played')) elHint.classList.add('off');
 function hud() { elLvl.textContent = level; elLeft.textContent = lanterns.length; }
 document.getElementById('restart').addEventListener('click', e => { e.stopPropagation(); transition(false); });
-document.getElementById('hero').addEventListener('click', e => { e.stopPropagation(); setHero(heroIx + 1); sfx.chime(2); });
 function transition(next) {
   if (state === 'fade') return;
   state = 'fade'; elFade.classList.add('on');
@@ -467,7 +487,7 @@ const dots = [];
     m.visible = false; scene.add(m); dots.push(m);
   }
 }
-const charge = new THREE.Mesh(sphereGeo, MAT.ball); charge.add(haloSprite(3.0, 0.3, 0xff8a3a)); ballFlames(charge); charge.visible = false; scene.add(charge);
+const charge = new THREE.Mesh(sphereGeo, noBall); charge.add(haloSprite(3.0, 0.3, 0xff8a3a)); ballFlames(charge); charge.visible = false; scene.add(charge);
 const tmpV = new THREE.Vector3(), tmpF = new THREE.Vector3(), hand = new THREE.Vector3();
 function handPos(yaw, out) { fwd(yaw, tmpF); return out.set(player.x + tmpF.x * HAND_F, HAND_H + player.y + player.g, player.z + tmpF.z * HAND_F); }
 function launchVel(yaw, power, out) {
@@ -497,7 +517,7 @@ function fling(yawRel, power) {
   body.position.set(hand.x, hand.y, hand.z);
   const v = launchVel(yaw, power, tmpV); body.velocity.set(v.x, v.y, v.z);
   body.angularDamping = 0.3; body.linearDamping = 0.02;
-  const mesh = new THREE.Mesh(sphereGeo, MAT.ball); mesh.scale.setScalar(BALL_R); mesh.castShadow = true; mesh.add(haloSprite(3.0, 0.3, 0xff8a3a)); ballFlames(mesh);
+  const mesh = new THREE.Mesh(sphereGeo, noBall); mesh.scale.setScalar(BALL_R); mesh.add(haloSprite(3.0, 0.3, 0xff8a3a)); ballFlames(mesh);
   mesh.position.copy(hand);
   register(body, mesh, 'ball');
   body.addEventListener('collide', e => {
@@ -525,6 +545,19 @@ function burst(o) {
   removeObj(o); hud();
   if (lanterns.length === 0 && state === 'play') { state = 'won'; stateT = 0; sfx.win(); }
 }
+// A tree to a fireball: a trunk, and a crown shaped like a flattened ball. It bounces off either.
+function ballTree(o, tx, tz, ty, m) {
+  const p = o.body.position, v = o.body.velocity, dx = p.x - tx, dz = p.z - tz, hd = Math.hypot(dx, dz);
+  if (hd > 3.3 * m) return;
+  const cy = (p.y - ty - 4.2 * m) / (1.7 * m), cr = hd / (2.9 * m), crown = cy * cy + cr * cr < 1, trunk = hd < 0.42 * m + BALL_R && p.y < ty + 3 * m;
+  if (!crown && !trunk) return;
+  const nx = hd > 1e-3 ? dx / hd : 1, nz = hd > 1e-3 ? dz / hd : 0, vn = v.x * nx + v.z * nz;
+  if (vn < 0) {
+    v.x = (v.x - 1.45 * vn * nx) * 0.6; v.z = (v.z - 1.45 * vn * nz) * 0.6;
+    if (vn < -3) { dust(p.x, p.y, p.z, 3); sfx.thump(Math.min(1, -vn / 20)); }
+  }
+  if (crown && cy > 0.2 && v.y < 0) v.y *= -0.3;             // dropped onto the top of it
+}
 function physics(dt) {
   acc += dt;
   let n = 0;
@@ -546,6 +579,8 @@ function physics(dt) {
       if (gh > 0.05 && p.y < gh + BALL_R) {                  // the hills are not in the physics world: bounce it off the slope by hand
         p.y = gh + BALL_R; if (v.y < 0) { if (v.y < -4) dust(p.x, gh + 0.1, p.z, 2); v.y *= -0.35; } v.x *= 0.9; v.z *= 0.9;
       }
+      for (const t of TREES) ballTree(o, t.x, t.z, 0, t.s * 1.5);
+      if (Math.hypot(p.x, p.z) > R) for (const t of WOODS) ballTree(o, t.x, t.z, t.y, t.m);
       for (const b of beacons) if (!b.lit && Math.hypot(p.x - b.x, p.z - b.z) < 1.9 && p.y > b.h - 0.5 && p.y < b.h + 8) { lightBeacon(b); o.age = 99; }
     }
     if (!o.splashed && p.y < -8) { o.splashed = true; splash(p.x, p.z, o.kind !== 'lantern'); if (o.kind === 'lantern') burst(o); }
@@ -665,6 +700,7 @@ function movePlayer(dt) {
     if (dd < rad && dd > 1e-4) { player.x = ox + dx / dd * rad; player.z = oz + dz / dd * rad; }
   };
   for (const t of TREES) push(t.x, t.z, 0.7 * t.s + 0.6);
+  push(npc.x, npc.z, npc.r);
   if (d > R) for (const t of WOODS) push(t.x, t.z, t.r);
   player.g = hillHeight(player.x, player.z);
   for (const o of objs) if (o.kind !== 'ball' && o.body.position.y < 2.4 + player.y && o.body.position.y > player.y - 0.5) push(o.body.position.x, o.body.position.z, 1.0);
@@ -700,6 +736,11 @@ function step(dtReal) {
 
   FIRE_T.value = time;
   movePlayer(dt);
+  {                                                          // the rider looks his way when he is close
+    const dx = player.x - npc.x, dz = player.z - npc.z, want = Math.hypot(dx, dz) < 16 ? Math.atan2(dx, dz) + Math.PI : npc.face;
+    let da = want - npc.group.rotation.y; da = Math.atan2(Math.sin(da), Math.cos(da));
+    npc.group.rotation.y += da * Math.min(1, dt * 1.6);
+  }
   updateHills(dt);
   physics(dt);
 
@@ -767,7 +808,7 @@ function frame(now) {
 // Scripted stepping for tests (the preview pane only runs frames while visible).
 window.game = {
   step(seconds = 1, dt = 1 / 60) { window.__manual = true; for (let t = 0; t < seconds; t += dt) step(dt); renderer.render(scene, camera); return this.state(); },
-  fling, jump, setHero, beacons, motes, lightBeacon, debug: { scene, camera, hero, acts, THROW, THREE, player, sites, renderer, get mixer() { return mixer; } },
+  fling, jump, setHero, beacons, motes, lightBeacon, debug: { WOODS, npc, scene, camera, hero, acts, THROW, THREE, player, sites, renderer, get mixer() { return mixer; } },
   walk(x, y) { window.__joy = x || y ? { x, y } : null; },
   setLevel(n) { level = n; buildLevel(); },
   setSeason(name) { scenery.setSeason(name); },

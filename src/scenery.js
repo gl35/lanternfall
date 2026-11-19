@@ -96,33 +96,96 @@ function hills() {
   return mesh;
 }
 
-// Woods on the hills: rounded crowns in the same painted tones as the meadow's trees, yellow above, teal below.
-function hillWoods(r, U) {
-  const N = 700, PER = 48, group = new THREE.Group(), d = new THREE.Object3D(), c = new THREE.Color(), n = new THREE.Vector3();
+// Woods on the hills: the same tree as the meadow's - bent trunk, forking limbs, a broad crown of many lobes.
+// There are hundreds, so far ones are drawn as a sketch of that crown (a few big clumps of its leaves over a
+// dark heart), and the couple of dozen nearest him are swapped for the full tree, leaf for leaf.
+function hillWoods(r, U, bareGeo) {
+  const N = 700, PER = 48, T = 4, SLOTS = 7, NEAR = 85, group = new THREE.Group(), d = new THREE.Object3D(), c = new THREE.Color(), n = new THREE.Vector3();
   const sunXZ = new THREE.Vector2(SUN_DIR.x, SUN_DIR.z).normalize();
+  const model = tree(rng(31), bareGeo), puffs = model.userData.puffs, r2 = rng(32);
+  const tone = t => { const f = THREE.MathUtils.clamp(t, 0, 0.999) * (TONES.length - 1), i0 = Math.floor(f); return c.copy(TONES[i0]).lerp(TONES[i0 + 1], Math.min(1, (f - i0) * 1.6)); };
+
+  // one crown, in the tree's own space: every clump of leaves the meadow tree has
+  const crown = [], BASE_Y = 2.75;
+  for (const [x, y, z, s] of puffs) {
+    for (let i = 0; i < 45; i++) {                           // the shaded underside
+      const a = r2() * 6.283, rr = Math.sqrt(r2()) * s * 0.95;
+      crown.push({ x: x + Math.cos(a) * rr, y: Math.max(BASE_Y, y - s * 0.5) + r2() * 0.35, z: z + Math.sin(a) * rr, size: s * (0.6 + r2() * 0.35), under: r2() * 0.8 });
+    }
+    for (let i = 0; i < 215; i++) {
+      let ly = 0, rad = 1;
+      for (let tries = 0; tries < 12; tries++) {
+        const cu = r2() * 1.7 - 0.7, a = r2() * 6.283, q = Math.sqrt(1 - cu * cu);
+        n.set(Math.cos(a) * q, cu, Math.sin(a) * q); rad = 0.55 + r2() * 0.52; ly = y + n.y * s * 0.84 * rad;
+        if (ly > BASE_Y) break;
+      }
+      crown.push({ x: x + n.x * s * rad, y: Math.max(BASE_Y, ly), z: z + n.z * s * rad, size: s * (0.62 + r2() * 0.4), nx: n.x, ny: n.y, nz: n.z,
+        base: n.y * 0.62 + (ly - 3.9) * 0.17 + (rad - 0.85) * 0.5 + (r2() - 0.5) * 0.3 + 0.46 });
+    }
+  }
+  for (let i = crown.length - 1; i > 0; i--) { const j = Math.floor(r2() * (i + 1)); [crown[i], crown[j]] = [crown[j], crown[i]]; }   // so drawing fewer thins it evenly
+  const CN = crown.length, cm = new Float32Array(CN * 16);
+  crown.forEach((q, i) => cm.set([q.size, 0, 0, 0, 0, q.size, 0, 0, 0, 0, q.size, 0, q.x, q.y, q.z, 1], i * 16));
+  const crownMat = new THREE.InstancedBufferAttribute(cm, 16);
+  // the tree is turned four ways; each turn has its own colours, since the sunny side stays put
+  const yaws = [0.4, 2.0, 3.6, 5.2], turnCol = (q, yaw) => q.nx === undefined ? c.copy(TONES[0]).lerp(TONES[1], q.under)
+    : tone(q.base + ((q.nx * Math.cos(yaw) + q.nz * Math.sin(yaw)) * sunXZ.x + (-q.nx * Math.sin(yaw) + q.nz * Math.cos(yaw)) * sunXZ.y) * 0.3);
+  const crownCol = yaws.map(yaw => { const a = new Float32Array(CN * 3); crown.forEach((q, i) => turnCol(q, yaw).toArray(a, i * 3)); return new THREE.InstancedBufferAttribute(a, 3); });
+  const sketch = crown.filter(q => q.nx !== undefined).slice(0, PER);
+
+  // far trees
   const cores = new THREE.InstancedMesh(new THREE.SphereGeometry(1, 10, 8), new THREE.MeshBasicMaterial({ color: 0x17604e, toneMapped: false }), N);
   const trunks = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.1, 0.17, 1, 6), new THREE.MeshBasicMaterial({ color: 0x8a5a44, toneMapped: false }), N);
   const leaves = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1), clumpMaterial(U), N * PER);
   let cx = 0, cz = 0, k = 0;
   for (let i = 0; i < N; i++) {
     if (i % 9 === 0) { const a = r() * 6.283, rad = 105 + Math.pow(r(), 1.3) * 230; cx = Math.cos(a) * rad; cz = Math.sin(a) * rad; }   // copses
-    const x = cx + (r() - 0.5) * 30, z = cz + (r() - 0.5) * 30, sc = 2.2 + r() * 2.6, ground = hillHeight(x, z), stem = sc * (0.45 + r() * 0.25), cy = ground + stem + sc * 0.55;
-    WOODS.push({ x, z, r: sc * 0.5 });
+    const x = cx + (r() - 0.5) * 30, z = cz + (r() - 0.5) * 30, sc = 2.2 + r() * 2.6, ground = hillHeight(x, z), M = sc * 0.42, tpl = i % T;
+    const yaw = yaws[tpl], cy = Math.cos(yaw), sy = Math.sin(yaw);
+    WOODS.push({ x, z, r: sc * 0.5, i, y: ground, m: M, tpl, slot: null, d: 0, want: false });
     d.rotation.set(0, 0, 0);
-    d.position.set(x, ground + stem / 2, z); d.scale.set(sc * 0.7, stem + sc * 0.3, sc * 0.7); d.updateMatrix(); trunks.setMatrixAt(i, d.matrix);
-    d.position.set(x, cy, z); d.scale.set(sc * 0.66, sc * 0.5, sc * 0.66); d.updateMatrix(); cores.setMatrixAt(i, d.matrix);
-    for (let j = 0; j < PER; j++, k++) {
-      const cu = r() * 1.3 - 0.3, a = r() * 6.283, q = Math.sqrt(1 - cu * cu), rad = 0.6 + r() * 0.48;
-      n.set(Math.cos(a) * q, cu, Math.sin(a) * q);
-      d.position.set(x + n.x * sc * rad, cy + n.y * sc * 0.78 * rad, z + n.z * sc * rad);
-      d.scale.setScalar(sc * (0.75 + r() * 0.5)); d.updateMatrix(); leaves.setMatrixAt(k, d.matrix);
-      const tone = n.y * 0.62 + (n.x * sunXZ.x + n.z * sunXZ.y) * 0.3 + (rad - 0.85) * 0.5 + (r() - 0.5) * 0.3 + 0.46;
-      const f = THREE.MathUtils.clamp(tone, 0, 0.999) * (TONES.length - 1), i0 = Math.floor(f);
-      c.copy(TONES[i0]).lerp(TONES[i0 + 1], Math.min(1, (f - i0) * 1.6)); leaves.setColorAt(k, c);
+    d.position.set(x, ground + M * 1.4, z); d.scale.set(M * 2, M * 3.2, M * 2); d.updateMatrix(); trunks.setMatrixAt(i, d.matrix);
+    d.position.set(x, ground + M * 3.95, z); d.scale.set(M * 2.5, M * 1.2, M * 2.3); d.updateMatrix(); cores.setMatrixAt(i, d.matrix);
+    for (const q of sketch) {
+      d.position.set(x + (q.x * cy + q.z * sy) * M, ground + q.y * M, z + (-q.x * sy + q.z * cy) * M);
+      d.scale.setScalar(q.size * M * 2.7); d.updateMatrix(); leaves.setMatrixAt(k, d.matrix);
+      leaves.setColorAt(k++, turnCol(q, yaw));
     }
   }
   cores.frustumCulled = trunks.frustumCulled = leaves.frustumCulled = false; leaves.userData.full = N * PER;
   group.add(trunks, cores, leaves); group.userData.leaves = leaves;
+  const keep = { leaves: leaves.instanceMatrix.array.slice(), cores: cores.instanceMatrix.array.slice(), trunks: trunks.instanceMatrix.array.slice() };
+  function showFar(w, on) {                                  // the sketch steps aside while the full tree stands in
+    for (const [m, per] of [[leaves, PER], [cores, 1], [trunks, 1]]) {
+      const a = m.instanceMatrix.array, o = w.i * per * 16, len = per * 16, src = keep[m === leaves ? 'leaves' : m === cores ? 'cores' : 'trunks'];
+      if (on) a.set(src.subarray(o, o + len), o); else a.fill(0, o, o + len);
+      m.instanceMatrix.addUpdateRange(o, len); m.instanceMatrix.needsUpdate = true;
+    }
+  }
+
+  // full trees, moved to whichever hill trees are nearest
+  const slots = [], plane = new THREE.PlaneGeometry(1, 1);
+  for (let i = 0; i < T * SLOTS; i++) {
+    const g = new THREE.Group(), tpl = i % T; g.rotation.y = yaws[tpl]; g.visible = false;
+    const trunk = new THREE.Mesh(model.children[0].geometry, trunkMat), limbs = new THREE.Mesh(model.children[1].geometry, trunkMat);
+    trunk.castShadow = trunk.receiveShadow = limbs.castShadow = true;
+    const lm = new THREE.InstancedMesh(plane, clumpMaterial(U), 1); lm.instanceMatrix = crownMat; lm.instanceColor = crownCol[tpl]; lm.count = CN;
+    lm.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 4.3, 0), 4.8);
+    g.add(trunk, limbs, lm); group.add(g); slots.push({ g, lm, tpl, tree: null });
+  }
+  const order = [], used = [0, 0, 0, 0];
+  group.userData.lod = (px, pz, q) => {
+    order.length = 0; used.fill(0);
+    for (const w of WOODS) { w.d = Math.hypot(w.x - px, w.z - pz) - (w.slot ? 6 : 0); w.want = false; if (w.d < NEAR) order.push(w); }
+    order.sort((a, b) => a.d - b.d);
+    for (const w of order) if (used[w.tpl] < SLOTS) { used[w.tpl]++; w.want = true; }
+    for (const sl of slots) if (sl.tree && !sl.tree.want) { showFar(sl.tree, true); sl.tree.slot = null; sl.tree = null; sl.g.visible = false; }
+    for (const w of order) if (w.want && !w.slot) {
+      const sl = slots.find(o => !o.tree && o.tpl === w.tpl); if (!sl) continue;
+      sl.tree = w; w.slot = sl; sl.g.position.set(w.x, w.y, w.z); sl.g.scale.setScalar(w.m); sl.g.visible = true; showFar(w, false);
+    }
+    for (const sl of slots) if (sl.tree) sl.lm.count = Math.floor(CN * q * (1 - 0.45 * sstep(35, NEAR, sl.tree.d)));   // a little thinner further off
+  };
   return group;
 }
 
@@ -408,12 +471,13 @@ function clumpMaterial(U) {
   mat.onBeforeCompile = s => {
     s.uniforms.uTime = U.time;
     s.vertexShader = 'uniform float uTime;\n' + s.vertexShader.replace('#include <project_vertex>', `
-      vec3 lc = instanceMatrix[3].xyz; float lsz = length(instanceMatrix[0].xyz);
+      vec3 lc = instanceMatrix[3].xyz; float lsz = length(instanceMatrix[0].xyz) * length(modelMatrix[0].xyz);
       float lh = fract(sin(dot(lc.xz, vec2(12.9898, 78.233)) + lc.y * 3.1) * 43758.5453);
-      float la = lh * 6.2832 + sin(uTime * 1.4 + lc.x * 0.7 + lc.z * 0.5) * 0.14;
+      vec4 wc = modelMatrix * vec4(lc, 1.0);
+      float la = lh * 6.2832 + sin(uTime * 1.4 + wc.x * 0.7 + wc.z * 0.5) * 0.14;
       vec2 lq = vec2(position.x * cos(la) - position.y * sin(la), position.x * sin(la) + position.y * cos(la)) * lsz;
-      lc.x += sin(uTime * 1.1 + lc.z * 0.4 + lc.y) * 0.05 * lsz;
-      vec4 mvPosition = viewMatrix * vec4(lc, 1.0);
+      wc.x += sin(uTime * 1.1 + wc.z * 0.4 + wc.y) * 0.05 * lsz;
+      vec4 mvPosition = viewMatrix * wc;
       mvPosition.xy += lq;
       gl_Position = projectionMatrix * mvPosition;`);
   };
@@ -651,7 +715,8 @@ export function buildScenery(scene) {
   });
   const foliage = leafCloud(r, U, trees); scene.add(foliage);
   const land = hills(); scene.add(land);
-  const woods = hillWoods(r, U); scene.add(woods);
+  const woods = hillWoods(r, U, bareGeos[0]); scene.add(woods);
+  let detailQ = 1, lodT = -1;
   for (let i = 0; i < 46; i++) {                             // rounded boulders, a few big ones
     const a = r() * 6.283, rad = Math.sqrt(r()) * (R - 1.5), s = (i < 6 ? 0.9 : 0.25) + r() * 0.5;
     const x = Math.cos(a) * rad, z = Math.sin(a) * rad;
@@ -699,10 +764,11 @@ export function buildScenery(scene) {
   return {
     setSeason,
     // 0.3 .. 1: draw that fraction of the grass and leaves (instances are in random order, so it thins evenly)
-    setDetail(q) { for (const m of [grassNear, grassFar, foliage, woods.userData.leaves]) m.count = Math.floor(m.userData.full * q); },
+    setDetail(q) { detailQ = q; lodT = -1; for (const m of [grassNear, grassFar, foliage, woods.userData.leaves]) m.count = Math.floor(m.userData.full * q); },
     get season() { return season; },
     update(t, px, pz, camera, pixelRatio = 1, py = 0) {
-      U.time.value = t; U.center.value.set(px, pz); sea.group.rotation.y = t * 0.003; heaps.rotation.y = t * 0.0016;
+      U.time.value = t; U.center.value.set(px, pz);
+      if (woods.visible && Math.abs(t - lodT) > 0.2) { lodT = t; woods.userData.lod(px, pz, detailQ); } sea.group.rotation.y = t * 0.003; heaps.rotation.y = t * 0.0016;
       sun.target.position.set(px, py, pz); sun.position.set(px + SUN_DIR.x * 60, py + SUN_DIR.y * 60, pz + SUN_DIR.z * 60);
       for (const f of [flakes, seeds]) if (f.visible) { f.material.uniforms.uCam.value.copy(camera.position); f.material.uniforms.uSize.value = pixelRatio; }
     },
