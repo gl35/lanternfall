@@ -129,7 +129,7 @@ const kid = { x: START.x + 7, z: START.z - 4, face: 0, group: new THREE.Group(),
 {
   kid.group.position.set(kid.x, 0, kid.z); scene.add(kid.group);
   new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).load(import.meta.env.BASE_URL + 'models/kid.glb', g => {
-    const m = g.scene; m.scale.setScalar(1.55);
+    const m = g.scene; m.scale.setScalar(1.9);
     m.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } if (o.isSkinnedMesh) o.frustumCulled = false; });
     for (const c of g.animations) for (const t of c.tracks) {      // the game moves the kid, not the clips
       if (!/Hips\.position$/.test(t.name)) continue;
@@ -150,7 +150,7 @@ function kidPlay(name, once = false, speed = 1) {
 }
 // Poses the clips don't have, as turns (in degrees) added to each bone's rest pose.
 const KID_POSE = {
-  sit: { LeftUpLeg: [-88, 0, 4], RightUpLeg: [-88, 0, -4], LeftLeg: [86, 0, 0], RightLeg: [86, 0, 0], LeftArm: [52, 0, 0], RightArm: [52, 0, 0] },      // hands up on the ropes
+  stand: { LeftArm: [58, 0, 0], RightArm: [58, 0, 0] },                                                                           // standing on the plank, hands up on the ropes
   lie: { LeftArm: [-72, 0, 0], RightArm: [-72, 0, 0] },                                                                            // arms by the sides
 };
 const kidE = new THREE.Euler(), kidQ = new THREE.Quaternion(), D2R = Math.PI / 180;
@@ -161,15 +161,15 @@ function kidMount(kind) {
   const e = play[kind]; kid.ride = kind; kid.mode = 'ride'; kid.t = 9 + Math.random() * 8; kid.goal = null; e.rider = true;
   kid.mixer.stopAllAction(); kid.act = null; kid.x = e.x; kid.z = e.z;
   const g = kid.group; g.rotation.set(0, 0, 0);
-  if (kind === 'swing') { e.pivot.add(g); g.position.set(0, -e.L - 0.78, -0.04); kid.pose = KID_POSE.sit; e.want = 0.62; }
-  else { e.sway.add(g); g.rotation.order = 'YXZ'; g.rotation.set(-Math.PI / 2, Math.PI / 2, 0); g.position.set(0.78, -0.5, 0); kid.pose = KID_POSE.lie; e.want = 0.13; }
+  if (kind === 'swing') { e.pivot.add(g); g.position.set(0, -e.L + 0.035, 0); kid.pose = KID_POSE.stand; e.want = 0.55; }
+  else { e.sway.add(g); g.rotation.order = 'YXZ'; g.rotation.set(-Math.PI / 2, Math.PI / 2, 0); g.position.set(0.95, -0.5, 0); kid.pose = KID_POSE.lie; e.want = 0.13; }
 }
 function kidDismount() {
   const e = play[kid.ride]; if (!e) return;
   e.rider = false; e.want = kid.ride === 'swing' ? 0.05 : 0.02;
   const a = e.g.rotation.y + (kid.ride === 'swing' ? 0 : Math.PI / 2);
   kid.x = e.x + Math.sin(a) * 1.9; kid.z = e.z + Math.cos(a) * 1.9; kid.face = a;
-  for (const n in kid.pose) { const b = kid.bones[n]; if (b) b.bone.quaternion.copy(b.bind); }
+  for (const n in kid.bones) { const b = kid.bones[n]; b.bone.quaternion.copy(b.bind); }
   kid.pose = null; kid.ride = null; scene.add(kid.group);
   kid.group.rotation.order = 'XYZ'; kid.group.rotation.set(0, a, 0); kid.group.position.set(kid.x, 0, kid.z);
   kid.mode = 'wait'; kid.t = Math.min(1.4, kidPlay('jump', true, 1.3));
@@ -183,9 +183,10 @@ function updateKid(dt, dtReal) {
   kid.mixer.update(dtReal);
   if (kid.mode === 'ride') {
     kid.t -= dt; kidPose();
-    if (kid.ride === 'swing') {                                    // legs pump with the swing
-      const ph = Math.sin(time * 2.06), k = kid.bones.LeftLeg && play.swing.amp / 0.62;
-      for (const n of ['LeftLeg', 'RightLeg']) { const b = kid.bones[n]; if (b) b.bone.quaternion.copy(b.bind).multiply(kidQ.setFromEuler(kidE.set((86 - 55 * k * (0.5 + 0.5 * ph)) * D2R, 0, 0))); }
+    if (kid.ride === 'swing') {                                    // knees dip at the bottom of each swing to pump it higher
+      const dip = (0.5 + 0.5 * Math.cos(time * 3.8)) * Math.min(1, play.swing.amp / 0.55);
+      for (const [n, deg] of [['LeftUpLeg', -22], ['RightUpLeg', -22], ['LeftLeg', 44], ['RightLeg', 44]]) { const b = kid.bones[n]; if (b) b.bone.quaternion.copy(b.bind).multiply(kidQ.setFromEuler(kidE.set(deg * dip * D2R, 0, 0))); }
+      kid.group.position.y = -play.swing.L + 0.035 - 0.07 * dip;
     }
     if (kid.t <= 0) kidDismount();
     return;
@@ -516,12 +517,12 @@ const play = { swing: null, hammock: null, spots: [] };
   // the swing: an A-frame of poles, two ropes and a plank
   {
     const g = new THREE.Group(); g.position.set(best.x, 0, best.z); g.rotation.y = face(best.x, best.z) + 0.5;
-    const H = 3.05, L = 2.15;
-    for (const sx of [-1, 1]) for (const sz of [-1, 1]) g.add(bar(V(sx * 1.45, -0.1, sz * 1.15), V(sx * 1.22, H + 0.12, -sz * 0.07), 0.075, MAT.wood));
-    g.add(bar(V(-1.5, H, 0), V(1.5, H, 0), 0.085, MAT.dark), knob(V(-1.5, H, 0), 0.12, MAT.dark), knob(V(1.5, H, 0), 0.12, MAT.dark));
+    const H = 3.7, L = 2.9;
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) g.add(bar(V(sx * 1.55, -0.1, sz * 1.35), V(sx * 1.28, H + 0.12, -sz * 0.07), 0.085, MAT.wood));
+    g.add(bar(V(-1.56, H, 0), V(1.56, H, 0), 0.095, MAT.dark), knob(V(-1.56, H, 0), 0.13, MAT.dark), knob(V(1.56, H, 0), 0.13, MAT.dark));
     const pivot = new THREE.Group(); pivot.position.y = H;
-    for (const sx of [-1, 1]) pivot.add(bar(V(sx * 0.44, 0, 0), V(sx * 0.44, -L, 0), 0.022, ropeMat));
-    const seat = new THREE.Mesh(new RoundedBoxGeometry(1.06, 0.07, 0.3, 3, 0.03), MAT.dark); seat.position.y = -L; seat.castShadow = true; pivot.add(seat);
+    for (const sx of [-1, 1]) pivot.add(bar(V(sx * 0.56, 0, 0), V(sx * 0.56, -L, 0), 0.024, ropeMat));
+    const seat = new THREE.Mesh(new RoundedBoxGeometry(1.3, 0.07, 0.34, 3, 0.03), MAT.dark); seat.position.y = -L; seat.castShadow = true; pivot.add(seat);
     g.add(pivot); scene.add(g);
     play.swing = { x: best.x, z: best.z, g, pivot, amp: 0.05, want: 0.05, L, rider: false };
     play.spots.push({ x: best.x, z: best.z, r: 1.7 });
@@ -550,7 +551,7 @@ const play = { swing: null, hammock: null, spots: [] };
 function updatePlay(dt) {
   const sw = play.swing, hm = play.hammock;
   sw.amp += (sw.want - sw.amp) * Math.min(1, dt * 0.7); hm.amp += (hm.want - hm.amp) * Math.min(1, dt * 0.8);
-  sw.pivot.rotation.x = Math.sin(time * 2.06) * sw.amp;
+  sw.pivot.rotation.x = Math.sin(time * 1.9) * sw.amp;
   hm.sway.rotation.x = Math.sin(time * 1.5) * hm.amp;
 }
 
@@ -776,7 +777,7 @@ function physics(dt) {
         p.y = gh + BALL_R; if (v.y < 0) { if (v.y < -4) dust(p.x, gh + 0.1, p.z, 2); v.y *= -0.35; } v.x *= 0.9; v.z *= 0.9;
       }
       for (const t of TREES) ballTree(o, t.x, t.z, 0, t.s * 1.5);
-      ballBody(o, kid.x, kid.z, kid.ride ? 0.8 : 0.45, kid.ride ? 2.2 : 1.55, kidStruck); ballBody(o, npc.x, npc.z, 1.5, 4.3, npcStruck);
+      ballBody(o, kid.x, kid.z, kid.ride ? 0.8 : 0.5, kid.ride ? 2.9 : 1.9, kidStruck); ballBody(o, npc.x, npc.z, 1.5, 4.3, npcStruck);
       if (Math.hypot(p.x, p.z) > R) for (const t of WOODS) ballTree(o, t.x, t.z, t.y, t.m);
       for (const b of beacons) if (!b.lit && Math.hypot(p.x - b.x, p.z - b.z) < 1.9 && p.y > b.h - 0.5 && p.y < b.h + 8) { lightBeacon(b); o.age = 99; }
     }
