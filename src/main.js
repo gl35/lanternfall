@@ -188,8 +188,8 @@ function updateKid(dt, dtReal) {
   kid.mixer.update(dtReal);
   if (kid.mode === 'ride') {
     kid.t -= dt; kidPose();
-    if (kid.ride === 'swing') {                                    // knees dip at the bottom of each swing to pump it higher
-      const dip = (0.5 + 0.5 * Math.cos(time * 3.8)) * Math.min(1, play.swing.amp / 0.55);
+    if (kid.ride === 'swing') {                                    // legs straight and still on the plank
+      const dip = 0;
       for (const [n, deg] of [['LeftUpLeg', -22], ['RightUpLeg', -22], ['LeftLeg', 44], ['RightLeg', 44]]) { const b = kid.bones[n]; if (b) b.bone.quaternion.copy(b.bind).multiply(kidQ.setFromEuler(kidE.set(deg * dip * D2R, 0, 0))); }
       kid.group.position.y = -play.swing.L + 0.035 - 0.07 * dip;
     }
