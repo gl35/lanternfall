@@ -572,6 +572,7 @@ function buildLevel() {
     if (sites.some(s => Math.hypot(s.x - x, s.z - z) < 10)) continue;
     if (TREES.some(t => Math.hypot(t.x - x, t.z - z) < 5)) continue;
     if (play.spots.some(p => Math.hypot(p.x - x, p.z - z) < 6.5)) continue;
+    if (Math.hypot(npc.x - x, npc.z - z) < 8.5) continue;       // nothing is built where the rider stands
     sites.push({ x, z });
   }
   sites.forEach((s, i) => {
