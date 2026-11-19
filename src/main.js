@@ -121,6 +121,71 @@ const npc = { x: 0, z: 0, r: 2.1, group: new THREE.Group(), face: 0 };
     npc.group.add(m);
   }, undefined, e => console.error('rider model failed to load', e));
 }
+// A kid at play in the meadow: dashes somewhere, stops, laughs, turns a flip, hops, wanders off again -
+// and every so often runs over to see what he is doing.
+const kid = { x: START.x + 7, z: START.z - 4, face: 0, group: new THREE.Group(), mixer: null, acts: {}, act: null, mode: 'wait', t: 1, tx: 0, tz: 0, speed: 0, visit: false };
+{
+  kid.group.position.set(kid.x, 0, kid.z); scene.add(kid.group);
+  new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).load(import.meta.env.BASE_URL + 'models/kid.glb', g => {
+    const m = g.scene; m.scale.setScalar(1.55);
+    m.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } if (o.isSkinnedMesh) o.frustumCulled = false; });
+    for (const c of g.animations) for (const t of c.tracks) {      // the game moves the kid, not the clips
+      if (!/Hips\.position$/.test(t.name)) continue;
+      for (let i = 0; i < t.values.length; i += 3) { t.values[i] = t.values[0]; t.values[i + 2] = t.values[2]; }
+    }
+    kid.mixer = new THREE.AnimationMixer(m);
+    for (const c of g.animations) kid.acts[c.name] = kid.mixer.clipAction(c);
+    kid.group.add(m); kidPlay('idle');
+  }, undefined, e => console.error('kid model failed to load', e));
+}
+function kidPlay(name, once = false, speed = 1) {
+  const a = kid.acts[name]; if (!a || a === kid.act) return a ? a.getClip().duration / speed : 1;
+  a.reset(); a.setLoop(once ? THREE.LoopOnce : THREE.LoopRepeat, Infinity); a.clampWhenFinished = once; a.timeScale = speed;
+  a.fadeIn(0.2).play(); if (kid.act) kid.act.fadeOut(0.2); kid.act = a;
+  return a.getClip().duration / speed;
+}
+function kidGo(x, z, run) {
+  kid.tx = x; kid.tz = z; kid.mode = 'go'; kid.t = 9; kid.speed = run ? 5.6 : 1.5;
+  kidPlay(run ? 'run' : Math.random() < 0.4 ? 'swagger' : 'walk', false, run ? 1.15 : 1);
+}
+function updateKid(dt, dtReal) {
+  if (!kid.mixer) return;
+  kid.mixer.update(dtReal);
+  const toP = Math.hypot(player.x - kid.x, player.z - kid.z), inMeadow = Math.hypot(player.x, player.z) < R;
+  kid.t -= dt;
+  if (kid.mode === 'go') {
+    const dx = kid.tx - kid.x, dz = kid.tz - kid.z, d = Math.hypot(dx, dz);
+    if (d < 0.5 || kid.t <= 0 || (kid.visit && toP < 3.2)) {       // there: now do something
+      const pick = Math.random(), near = kid.visit || toP < 7; kid.visit = false; kid.mode = 'wait';
+      if (near) kid.face = Math.atan2(player.x - kid.x, player.z - kid.z);
+      if (pick < 0.3) kid.t = Math.min(3.5, kidPlay('laugh_01', true));
+      else if (pick < 0.5) kid.t = kidPlay('flip', true);
+      else if (pick < 0.68) kid.t = kidPlay('jump', true);
+      else if (pick < 0.8 && near) kid.t = kidPlay('agree', true);
+      else { kidPlay('idle'); kid.t = 1 + Math.random() * 2.5; }
+    } else {
+      const want = Math.atan2(dx, dz); let da = want - kid.face; da = Math.atan2(Math.sin(da), Math.cos(da));
+      kid.face += da * Math.min(1, dt * 7);
+      kid.x += Math.sin(kid.face) * kid.speed * dt; kid.z += Math.cos(kid.face) * kid.speed * dt;
+    }
+  } else if (kid.t <= 0) {                                         // off again
+    if (inMeadow && toP > 6 && Math.random() < 0.3) { kid.visit = true; kidGo(player.x, player.z, true); }
+    else {
+      const a = Math.random() * 6.283, far = Math.random() < 0.65, rad = far ? 6 + Math.random() * 14 : 2 + Math.random() * 4;
+      let x = kid.x + Math.cos(a) * rad, z = kid.z + Math.sin(a) * rad; const d = Math.hypot(x, z), lim = R - 5;
+      if (d > lim) { x *= lim / d; z *= lim / d; }
+      kidGo(x, z, far);
+    }
+  }
+  const out = (ox, oz, rad) => { const dx = kid.x - ox, dz = kid.z - oz, dd = Math.hypot(dx, dz); if (dd < rad && dd > 1e-4) { kid.x = ox + dx / dd * rad; kid.z = oz + dz / dd * rad; } };
+  for (const t of TREES) out(t.x, t.z, 0.7 * t.s + 0.5);
+  for (const st of sites) out(st.x, st.z, 3.6);                    // keeps clear of the towers
+  out(npc.x, npc.z, npc.r); out(player.x, player.z, 1.0);
+  kid.group.position.set(kid.x, 0, kid.z);
+  let dy = kid.face - kid.group.rotation.y; dy = Math.atan2(Math.sin(dy), Math.cos(dy));
+  kid.group.rotation.y += dy * Math.min(1, dt * 10);
+}
+
 function heroPlay(name, { fade = 0.25, once = false, speed = 1, at = null } = {}) {
   const a = acts[name]; if (!a) return;
   if (a !== heroAct) {
@@ -700,7 +765,7 @@ function movePlayer(dt) {
     if (dd < rad && dd > 1e-4) { player.x = ox + dx / dd * rad; player.z = oz + dz / dd * rad; }
   };
   for (const t of TREES) push(t.x, t.z, 0.7 * t.s + 0.6);
-  push(npc.x, npc.z, npc.r);
+  push(npc.x, npc.z, npc.r); push(kid.x, kid.z, 0.9);
   if (d > R) for (const t of WOODS) push(t.x, t.z, t.r);
   player.g = hillHeight(player.x, player.z);
   for (const o of objs) if (o.kind !== 'ball' && o.body.position.y < 2.4 + player.y && o.body.position.y > player.y - 0.5) push(o.body.position.x, o.body.position.z, 1.0);
@@ -741,6 +806,7 @@ function step(dtReal) {
     let da = want - npc.group.rotation.y; da = Math.atan2(Math.sin(da), Math.cos(da));
     npc.group.rotation.y += da * Math.min(1, dt * 1.6);
   }
+  updateKid(dt, dtReal);
   updateHills(dt);
   physics(dt);
 
@@ -808,7 +874,7 @@ function frame(now) {
 // Scripted stepping for tests (the preview pane only runs frames while visible).
 window.game = {
   step(seconds = 1, dt = 1 / 60) { window.__manual = true; for (let t = 0; t < seconds; t += dt) step(dt); renderer.render(scene, camera); return this.state(); },
-  fling, jump, setHero, beacons, motes, lightBeacon, debug: { WOODS, npc, scene, camera, hero, acts, THROW, THREE, player, sites, renderer, get mixer() { return mixer; } },
+  fling, jump, setHero, beacons, motes, lightBeacon, debug: { WOODS, npc, kid, scene, camera, hero, acts, THROW, THREE, player, sites, renderer, get mixer() { return mixer; } },
   walk(x, y) { window.__joy = x || y ? { x, y } : null; },
   setLevel(n) { level = n; buildLevel(); },
   setSeason(name) { scenery.setSeason(name); },
