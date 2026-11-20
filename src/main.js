@@ -1284,7 +1284,7 @@ function movePlayer(dt) {
     camYaw += jx * 1.15 * dt;                                // pushing sideways swings the view round as he walks
     const s = Math.sin(camYaw), c = Math.cos(camYaw);
     const mx = c * jx + s * -jy, mz = s * jx - c * -jy;      // right * jx + forward * (-jy)
-    const sp = SPEED * (player.flying ? 2.1 : 1);
+    const sp = SPEED * (player.flying ? 2.1 : player.swim ? 0.8 : 1);
     player.x += mx * sp * dt; player.z += mz * sp * dt;
     if (!(aim.on && aim.valid) && heroKick <= 0) player.face = Math.atan2(mx, -mz);
     player.walkT += dt * (HERO.mount ? 4 + 5 * l : 5 + 6 * l);
@@ -1309,7 +1309,12 @@ function movePlayer(dt) {
     const feet = player.g + player.y;
     castle.resolve(player, feet, HERO.mount ? 1.2 : 0.45);
     let g2 = castle.groundAt(player.x, player.z, feet);
-    if (Math.hypot(player.x - BAY.x, player.z - BAY.z) < BAY.r) g2 = Math.max(g2, BAY.level - 0.85);   // in the cove he wades, waist deep at most
+    const wasSwim = player.swim; player.swim = false;
+    if (Math.hypot(player.x - BAY.x, player.z - BAY.z) < BAY.r) {
+      if (heroIx === KID && g2 < BAY.level - (wasSwim ? 0.75 : 0.95) && player.y <= 0.05 && !player.flying) { player.swim = true; g2 = BAY.level - 0.32; }   // afloat, stretched out at the surface
+      else g2 = Math.max(g2, BAY.level - 0.85);              // in the cove he wades, waist deep at most
+    }
+    if (player.swim !== wasSwim) { for (let i = 0; i < 12; i++) spawn(player.x + rnd(0.5), BAY.level + 0.1, player.z + rnd(0.5), rnd(1.6), 1.5 + Math.random() * 2.5, rnd(1.6), 0.5 + Math.random() * 0.4, 0.09, { color: 0xeaf7ff, g: 7 }); sfx.whoosh(0.12); }
     const drop = feet - g2;
     player.y = player.y <= 0.001 && drop < 0.5 ? 0 : Math.max(0, drop);     // small steps and slopes are just walked; a real drop is a fall
     player.g = g2;
@@ -1375,17 +1380,18 @@ function step(dtReal) {
   hero.position.set(player.x, player.g + player.y + (HERO.glide ? 0.1 + Math.sin(time * 2.2) * 0.05 : air ? 0 : Math.abs(stride) * (HERO.mount ? 0.3 : 0.09) * fake), player.z);
   const tuck = air && !CLIP.jump ? THREE.MathUtils.clamp(player.vy / JUMP_V, -1, 1) * -0.22 : 0;
   if (HERO.mount) heroTilt.rotation.set(Math.sin(player.walkT * 2 + 0.9) * 0.085 * bob + tuck * 1.3, 0, 0);   // a rocking gallop
+  else if (player.swim) { heroTilt.rotation.set(-1.22, 0, Math.sin(time * (2.2 + 4.2 * bob)) * 0.1); hero.position.y += Math.sin(time * 2.3) * 0.04; if (bob > 0.3 && Math.random() < dtReal * 9) spawn(player.x + rnd(0.5), BAY.level + 0.05, player.z + rnd(0.5), rnd(0.8), 0.8 + Math.random() * 1.4, rnd(0.8), 0.45, 0.07, { color: 0xeaf7ff, g: 7 }); }
   else if (player.flying) heroTilt.rotation.set(-1.05 * bob, 0, Math.sin(time * 2.4) * 0.06);
   else if (HERO.glide) heroTilt.rotation.set(-0.08 * bob + tuck, 0, Math.sin(time * 1.6) * 0.025);   // leans into it, swaying a little
   else heroTilt.rotation.set(-0.16 * fake + tuck, 0, stride * 0.05 * fake);
   if (heroLoaded) {
     heroKick = Math.max(0, heroKick - dtReal / THROW.hold);
-    const mode = state === 'won' ? 'win' : heroKick > 0 ? 'throw' : aiming ? 'aim' : player.perch && CLIP.jump ? 'perch' : air && player.flying && CLIP.jump ? 'fly' : air && CLIP.jump ? 'jump' : player.moving > 0.25 && CLIP.walk ? 'walk' : 'idle';
+    const mode = state === 'won' ? 'win' : heroKick > 0 ? 'throw' : aiming ? 'aim' : player.swim && CLIP.jump ? 'swim' : player.perch && CLIP.jump ? 'perch' : air && player.flying && CLIP.jump ? 'fly' : air && CLIP.jump ? 'jump' : player.moving > 0.25 && CLIP.walk ? 'walk' : 'idle';
     if (mode !== heroMode) {
       if (mode === 'win') heroPlay(CLIP.win || CLIP.idle, { fade: 0.4 });
       else if (mode === 'aim') heroPlay(THROW.clip, { fade: 0.18, speed: 0, at: THROW.wind });
       else if (mode === 'throw') heroPlay(THROW.clip, { fade: 0.08, speed: THROW.speed, once: true, at: heroMode === 'aim' ? null : THROW.wind });
-      else if (mode === 'fly' || mode === 'perch') heroPlay(CLIP.jump, { fade: 0.15, speed: 0, at: HOP.t0 + (HOP.t1 - HOP.t0) * 0.5 });
+      else if (mode === 'fly' || mode === 'perch' || mode === 'swim') heroPlay(CLIP.jump, { fade: 0.15, speed: 0, at: HOP.t0 + (HOP.t1 - HOP.t0) * 0.5 });
       else if (mode === 'jump') heroPlay(CLIP.jump, { fade: 0.08, once: true, at: HOP.t0, speed: (HOP.t1 - HOP.t0) / (2 * JUMP_V / GRAVITY) });
       else if (mode === 'walk') heroPlay(CLIP.walk, { fade: 0.2 });
       else heroPlay(CLIP.idle, { fade: 0.35 });
@@ -1393,7 +1399,8 @@ function step(dtReal) {
     }
     if (mode === 'walk') heroAct.timeScale = HERO.stroll ? 0.7 + player.moving * 1.0 : 0.6 + player.moving * 1.5;
     mixer.update(dtReal);
-    flyW += ((heroMode === 'fly' || player.perch ? 1 : 0) - flyW) * Math.min(1, dtReal * 8);
+    flyW += ((heroMode === 'fly' || player.perch || player.swim ? 1 : 0) - flyW) * Math.min(1, dtReal * 8);
+    const stroke = time * (2.2 + 4.2 * player.moving), pull = 28 + 58 * player.moving;
     const POSE = player.perch ? SIT_POSE : FLY_POSE;
     wings.visible = heroIx === KID && player.flying && player.y > 0 && !!flyBones.Spine2 && !!wings.userData.ready;   // hers alone, and only in the air
     if (wings.visible) {                                           // they sit between her shoulder blades and beat
@@ -1405,6 +1412,12 @@ function step(dtReal) {
     } else wingW = 0;
     if (flyW > 0.01 && HERO.fly) for (const n in flyBones) {
       const b = flyBones[n]; let [x, y, z] = POSE[n] || FLY_ZERO;
+      if (player.swim) {
+        if (n === 'LeftArm') x = 22 + pull * Math.sin(stroke); else if (n === 'RightArm') x = 22 + pull * Math.sin(stroke + Math.PI);
+        else if (n === 'LeftUpLeg') x = 13 * Math.sin(stroke * 2); else if (n === 'RightUpLeg') x = -13 * Math.sin(stroke * 2);
+        else if (n === 'LeftLeg') x = 10 + 10 * Math.sin(stroke * 2 + 1); else if (n === 'RightLeg') x = 10 - 10 * Math.sin(stroke * 2 + 1);
+        else if (n === 'Head' || n === 'Neck') x = -24;                                // chin up, looking where she is going
+      }
       b.bone.quaternion.slerp(kidQ.copy(b.bind).multiply(kidQ2.setFromEuler(kidE.set(x * D2R, y * D2R, z * D2R))), flyW);
     }
     if (player.perch && HERO.fly) sitLegs(flyW);
