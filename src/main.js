@@ -169,36 +169,30 @@ const KID_POSE = {
 const flyBones = {}, FLY_POSE = { LeftArm: [20, 0, 0], RightArm: [20, 0, 0], LeftForeArm: [0, 0, 0], RightForeArm: [0, 0, 0], LeftHand: [0, 0, 0], RightHand: [0, 0, 0] };   // arms straight out to the sides, like wings
 let flyW = 0, wingW = 0;
 const FLY_ZERO = [0, 0, 0];
-// White wings that open from her back while she flies: a fan of long feathers with a row of short ones over them.
+// Her wings: a modelled pair, cut down the middle into a left and a right so each can beat from her back.
 const wings = new THREE.Group(), wingP = new THREE.Vector3();
+const WING = { scale: 1.8, root: 0.05 };                     // how big they are, and how far up the model they join her back
 {
-  // one feather: a long leaf with a pointed tip, lying along +x, shaded from a cool grey at the quill to white at the tip
-  const featherGeo = new THREE.BufferGeometry();
-  {
-    const N = 10, pos = [], col = [], idx = [];
-    for (let k = 0; k <= N; k++) {
-      const t = k / N, wd = Math.sin(Math.min(1, t * 1.15 + 0.06) * Math.PI) ** 0.75 * (1 - 0.25 * t), z = -0.06 * t * t;   // widest a third along, drawn to a point
-      for (const e of [-1, 0, 1]) { pos.push(t, e * wd, z + (e ? 0 : 0.22 * wd)); const c = e ? 0.7 + 0.12 * t : 1; col.push(c * 0.95, c * 0.975, c); }   // a raised quill, edges in soft shadow
-      if (k < N) { const a = k * 3; idx.push(a, a + 3, a + 1, a + 1, a + 3, a + 4, a + 1, a + 4, a + 2, a + 2, a + 4, a + 5); }
+  for (const side of [1, -1]) wings.add(new THREE.Group());
+  new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).load(import.meta.env.BASE_URL + 'models/wings.glb', g => {
+    let src = null; g.scene.traverse(o => { if (o.isMesh && !src) src = o; });
+    g.scene.updateMatrixWorld(true);
+    const geo = src.geometry, pos = geo.attributes.position, ix = geo.index.array, half = [[], []], M = src.matrixWorld.clone(), v = new THREE.Vector3();
+    for (let k = 0; k < ix.length; k += 3) {                 // as the model stands it spans left to right: one wing each side of the middle
+      let x = 0; for (let c = 0; c < 3; c++) x += v.fromBufferAttribute(pos, ix[k + c]).applyMatrix4(M).x;
+      half[x < 0 ? 0 : 1].push(ix[k], ix[k + 1], ix[k + 2]);
     }
-    featherGeo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); featherGeo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
-    featherGeo.setIndex(idx); featherGeo.computeVertexNormals();
-  }
-  const mat = new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.6, side: THREE.DoubleSide, emissive: 0xaab4c8, emissiveIntensity: 0.3 });
-  const edge = t => [0.95 * t, 0.4 * Math.sin(Math.min(1, t * 1.55) * Math.PI * 0.5) - 0.3 * Math.max(0, t - 0.62) ** 1.5 * 4];   // rises to the wrist, then sweeps out and down
-  for (const side of [1, -1]) {
-    const w = new THREE.Group();
-    const row = (n, len, wide, z, drop) => {
-      for (let k = 0; k < n; k++) {
-        const t = k / (n - 1), [x, y] = edge(t), a = (-100 + 78 * t ** 1.15) * Math.PI / 180, f = new THREE.Mesh(featherGeo, mat);
-        f.scale.set(len(t) * (k % 2 ? 1 : 0.94), wide, 1); f.position.set(x, y - drop, z + k * 0.0015); f.rotation.set((k % 2 ? 0.16 : -0.1), 0, a); f.castShadow = true; w.add(f);
-      }
-    };
-    row(15, t => 0.5 + 0.62 * Math.sin((0.12 + 0.88 * t) * Math.PI * 0.62), 0.075, 0, 0);         // flight feathers, longest toward the tip
-    row(13, t => 0.3 + 0.24 * Math.sin((0.2 + 0.8 * t) * Math.PI * 0.7), 0.065, -0.03, 0);         // a shorter row over them
-    row(12, t => 0.17 + 0.08 * t, 0.055, -0.055, -0.02);                                           // small ones along the edge
-    w.scale.x = side; w.position.x = side * 0.05; wings.add(w);
-  }
+    const mat = src.material.clone(); mat.side = THREE.DoubleSide;
+    half.forEach((list, n) => {
+      const hg = new THREE.BufferGeometry();
+      for (const name of ['position', 'normal', 'uv']) if (geo.attributes[name]) hg.setAttribute(name, geo.attributes[name]);
+      hg.setIndex(list);
+      const m = new THREE.Mesh(hg, mat); m.castShadow = true; m.frustumCulled = false; m.matrixAutoUpdate = false; m.matrix.copy(M);
+      const turn = new THREE.Group(); turn.rotation.y = Math.PI; turn.scale.setScalar(WING.scale); turn.position.y = -WING.root * WING.scale;   // faced the way she faces, joined at her back
+      turn.add(m); wings.children[n].add(turn);
+    });
+    wings.userData.ready = true;
+  }, undefined, e => console.error('wings model failed to load', e));
   wings.visible = false; heroTilt.add(wings);
 }
 const kidE = new THREE.Euler(), kidQ = new THREE.Quaternion(), kidQ2 = new THREE.Quaternion(), D2R = Math.PI / 180;
@@ -1122,13 +1116,13 @@ function step(dtReal) {
     if (mode === 'walk') heroAct.timeScale = HERO.stroll ? 0.7 + player.moving * 1.0 : 0.6 + player.moving * 1.5;
     mixer.update(dtReal);
     flyW += ((heroMode === 'fly' ? 1 : 0) - flyW) * Math.min(1, dtReal * 8);
-    wings.visible = heroIx === KID && player.flying && player.y > 0 && !!flyBones.Spine2;   // hers alone, and only in the air
+    wings.visible = heroIx === KID && player.flying && player.y > 0 && !!flyBones.Spine2 && !!wings.userData.ready;   // hers alone, and only in the air
     if (wings.visible) {                                           // they sit between her shoulder blades and beat
       wingW += (1 - wingW) * Math.min(1, dtReal * 7);
-      heroTilt.worldToLocal(flyBones.Spine2.bone.getWorldPosition(wingP)); wings.position.set(wingP.x, wingP.y + 0.05, wingP.z + 0.24);
-      wings.scale.setScalar(Math.max(0.01, wingW) * 0.85);
-      const beat = 0.14 + (0.5 + 0.5 * Math.sin(time * 5.2)) * 0.5, fold = Math.sin(time * 5.2 - 0.9) * 0.08;   // they sweep back from her shoulders and never forward, so they stay clear of her arms
-      wings.children[0].rotation.set(0, -beat, 0.1 + fold); wings.children[1].rotation.set(0, beat, -0.1 - fold);
+      heroTilt.worldToLocal(flyBones.Spine2.bone.getWorldPosition(wingP)); wings.position.set(wingP.x, wingP.y + 0.25, wingP.z + 0.24);
+      wings.scale.setScalar(Math.max(0.01, wingW));
+      const beat = 0.14 + (0.5 + 0.5 * Math.sin(time * 5.2)) * 0.5, fold = Math.sin(time * 5.2 - 0.9) * 0.12;   // they sweep back from her shoulders and never forward, so they stay clear of her arms
+      wings.children[0].rotation.set(0, -beat, fold); wings.children[1].rotation.set(0, beat, -fold);
     } else wingW = 0;
     if (flyW > 0.01 && HERO.fly) for (const n in flyBones) {
       const b = flyBones[n], [x, y, z] = FLY_POSE[n] || FLY_ZERO;
@@ -1168,7 +1162,7 @@ function frame(now) {
 // Scripted stepping for tests (the preview pane only runs frames while visible).
 window.game = {
   step(seconds = 1, dt = 1 / 60) { window.__manual = true; for (let t = 0; t < seconds; t += dt) step(dt); renderer.render(scene, camera); return this.state(); },
-  fling, jump, setHero, swapHero, beacons, motes, lightBeacon, debug: { FLY_POSE, wings, WOODS, npc, kid, stand, stand2, play, KID_POSE, kidMount, kidDismount, scene, camera, hero, acts, THROW, THREE, player, sites, renderer, get mixer() { return mixer; } },
+  fling, jump, setHero, swapHero, beacons, motes, lightBeacon, debug: { FLY_POSE, WING, wings, WOODS, npc, kid, stand, stand2, play, KID_POSE, kidMount, kidDismount, scene, camera, hero, acts, THROW, THREE, player, sites, renderer, get mixer() { return mixer; } },
   walk(x, y) { window.__joy = x || y ? { x, y } : null; },
   setLevel(n) { level = n; buildLevel(); },
   setSeason(name) { scenery.setSeason(name); },
