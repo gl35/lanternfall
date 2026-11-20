@@ -65,8 +65,9 @@ function pickClips() {
   if (CLIP.jump) findHop(acts[CLIP.jump].getClip());
   CLIP.win = find(/dance|cheer|victory/i);
   const t = find(/throw|cast|pitch/i);
+  THROW.proc = false;
   if (t) Object.assign(THROW, { clip: t, wind: 0, speed: 1.4, hold: Math.min(1.2, acts[t].getClip().duration / 1.4) });
-  else if (!acts[THROW.clip] && CLIP.jump) Object.assign(THROW, { clip: CLIP.jump, wind: HOP.t0, speed: 1.5, hold: 0.6 });   // no throw of her own: she hops as she lets go
+  else if (!acts[THROW.clip]) Object.assign(THROW, { clip: CLIP.idle, wind: 0, speed: 1, hold: 0.55, proc: true });   // no throw clip of her own: she stays on her feet and her arm is swung for her
   if (!CLIP.win) CLIP.win = find(/laugh/i);
 }
 // The heroes to pick from. A mount has no clips: it gallops by rocking and bounding, and covers ground faster.
@@ -169,7 +170,7 @@ const KID_POSE = {
   hold: { LeftArm: [-30, 0, 0], RightArm: [-30, 0, 0] },                                                                           // hands a little out in front, on a rail or a handle                                                                            // arms by the sides
 };
 const flyBones = {}, FLY_POSE = { LeftArm: [20, 0, 0], RightArm: [20, 0, 0], LeftForeArm: [0, 0, 0], RightForeArm: [0, 0, 0], LeftHand: [0, 0, 0], RightHand: [0, 0, 0] };   // arms straight out to the sides, like wings
-let flyW = 0, wingW = 0, swimT = 0;
+let flyW = 0, wingW = 0, swimT = 0, throwW = 0;
 const SIT_POSE = { LeftArm: [-58, 0, 0], RightArm: [-58, 0, 0] };
 // Turn a bone so the stretch from it to its child points along a given direction (in the world), keeping its twist.
 const aimA = new THREE.Vector3(), aimB = new THREE.Vector3(), aimQ = new THREE.Quaternion(), aimW = new THREE.Quaternion(), aimP = new THREE.Quaternion();
@@ -242,6 +243,40 @@ const kidE = new THREE.Euler(), kidQ = new THREE.Quaternion(), kidQ2 = new THREE
 function kidPose() {
   for (const n in kid.pose) { const b = kid.bones[n]; if (!b) continue; const [x, y, z] = kid.pose[n]; b.bone.quaternion.copy(b.bind).multiply(kidQ.setFromEuler(kidE.set(x * D2R, y * D2R, z * D2R))); }
 }
+// What her arms and legs do on each ride. Plain turns for the simple swings of a limb, aimed bones where a limb has to point somewhere.
+function rideLimbs() {
+  const k = kid.ride, e = play[k], B = kid.bones, t = time, LR = [['Left', -1, 0], ['Right', 1, Math.PI]];
+  const set = (n, x) => { const b = B[n]; if (b) b.bone.quaternion.copy(b.bind).multiply(kidQ.setFromEuler(kidE.set(x * D2R, 0, 0))); };
+  const free = n => { if (B[n]) B[n].bone.quaternion.copy(B[n].bind); };
+  kid.group.getWorldQuaternion(sitQ);
+  const aim = (a, b, x, y, z) => { if (B[a] && B[b]) aimBone(B[a].bone, B[b].bone, sitD.set(x, y, z).normalize().applyQuaternion(sitQ), 1); };
+  const arm = (side, sx, u, f) => { free(side + 'Arm'); free(side + 'ForeArm'); aim(side + 'Arm', side + 'ForeArm', sx * u[0], u[1], u[2]); aim(side + 'ForeArm', side + 'Hand', sx * f[0], f[1], f[2]); };
+  const leg = (side, sx, u, f) => { free(side + 'UpLeg'); free(side + 'Leg'); aim(side + 'UpLeg', side + 'Leg', sx * u[0], u[1], u[2]); aim(side + 'Leg', side + 'Foot', sx * f[0], f[1], f[2]); };
+  if (k === 'swing') {                                         // pumping: knees bend at the back of the swing and straighten on the way through
+    const dip = Math.max(0, Math.sin(t * 1.9)) * Math.min(1, e.amp / 0.5) * 0.6;
+    for (const [side] of LR) { set(side + 'UpLeg', -24 * dip); set(side + 'Leg', 48 * dip); set(side + 'Arm', 58 + 12 * dip); }
+    kid.group.position.y = -e.L + 0.035 - 0.075 * dip;
+  } else if (k === 'hammock') {                                // idling: a knee drawn up and let down, an arm drifting
+    for (const [side, , ph] of LR) { const v = 0.5 + 0.5 * Math.sin(t * 1.2 + ph); set(side + 'UpLeg', -6 - 26 * v); set(side + 'Leg', 10 + 50 * v); set(side + 'Arm', -72 + 10 * Math.sin(t * 0.9 + ph * 0.6)); }
+  } else if (k === 'round') {                                  // one foot scoots it round, hands working the rail
+    const a = 0.4 + 0.6 * Math.min(1, e.speed / 2);
+    set('RightUpLeg', 24 * a * Math.sin(t * 3.2)); set('RightLeg', (24 + 24 * Math.sin(t * 3.2 + 1.2)) * a); set('LeftUpLeg', -7); set('LeftLeg', 14);
+    for (const [side, , ph] of LR) set(side + 'Arm', -30 + 9 * a * Math.sin(t * 3.2 + ph));
+  } else if (k === 'seesaw') {                                 // legs fold as her end comes down and kick out as it goes up
+    const q = Math.sin(t * 1.7) * Math.min(1, e.amp / 0.25);
+    for (const [side, sx] of LR) { leg(side, sx, [0.75, -0.3 + 0.22 * q, 1], [0.12, -1, 0.15 + 0.55 * q]); set(side + 'Arm', -30 + 11 * q); }
+  } else if (k === 'slide') {                                  // arms thrown up on the way down, feet kicking
+    const sm = x => { x = Math.min(1, Math.max(0, x)); return x * x * (3 - 2 * x); }, p = sm((e.tt - 0.9) / 0.35) * (1 - sm((e.tt - 2.5) / 0.5));
+    for (const [side, sx, ph] of LR) { leg(side, sx, [0.1, -0.3, 1], [0.05, -0.5 + (0.08 + 0.2 * p) * Math.sin(t * 8 + ph), 1]); set(side + 'Arm', -30 + 92 * p + 9 * p * Math.sin(t * 11 + ph)); }
+  } else if (k === 'bars') {                                   // hand over hand along the rungs, legs swinging under her
+    for (const [side, sx, ph] of LR) {
+      const a = Math.sin(e.tt * 2.6 + ph), b = Math.sin(e.tt * 2.6 + ph + Math.PI), b2 = Math.sin(e.tt * 2.6 + ph + Math.PI - 0.8);
+      arm(side, sx, [0.16, 1, 0.34 * a], [0.04, 1, 0.14 * a]); leg(side, sx, [0.07, -1, 0.3 * b], [0.04, -1, -0.3 + 0.26 * b2]);
+    }
+  } else if (k === 'sand') {                                   // patting the sand into shape, one hand then the other
+    for (const [side, sx, ph] of LR) { const pat = 0.5 + 0.5 * Math.sin(t * 6.5 + ph); arm(side, sx, [0.3, -0.72 + 0.22 * pat, 0.6], [0.0, -0.62 + 0.7 * pat, 0.75]); leg(side, sx, [0.22, -0.3, 1], [0.1, -0.5 + 0.07 * Math.sin(t * 3 + ph), 1]); }
+  }
+}
 function kidMount(kind) {
   const e = play[kind]; kid.ride = kind; kid.mode = 'ride'; kid.t = 9 + Math.random() * 8; kid.goal = null; e.rider = true;
   kid.mixer.stopAllAction(); kid.act = null; kid.x = e.x; kid.z = e.z;
@@ -271,12 +306,7 @@ function updateKid(dt, dtReal) {
   kid.mixer.update(dtReal);
   if (kid.mode === 'ride') {
     kid.t -= dt; kidPose();
-    if (kid.ride === 'swing') {                                    // legs straight and still on the plank
-      const dip = 0;
-      for (const [n, deg] of [['LeftUpLeg', -22], ['RightUpLeg', -22], ['LeftLeg', 44], ['RightLeg', 44]]) { const b = kid.bones[n]; if (b) b.bone.quaternion.copy(b.bind).multiply(kidQ.setFromEuler(kidE.set(deg * dip * D2R, 0, 0))); }
-      kid.group.position.y = -play.swing.L + 0.035 - 0.07 * dip;
-    }
-    if (kid.sit) sitLegs(1, kid.bones, kid.group, 1, kid.sit);
+    rideLimbs();
     if (kid.t <= 0 && play[kid.ride].auto && player.ride) playerDismount();
     else if (kid.t <= 0 && !player.ride) kidDismount();
     return;
@@ -883,11 +913,99 @@ const play = { swing: null, hammock: null, spots: [] };
     {
       const ang = a => ({ x: BAY.x + Math.cos(a), z: BAY.z + Math.sin(a) }), on = (a, r) => { const p = { x: BAY.x + Math.cos(a) * r, z: BAY.z + Math.sin(a) * r }; return V(p.x, hillHeight(p.x, p.z), p.z); };
       const toMeadow = Math.atan2(-BAY.z, -BAY.x);              // the side of the cove he arrives on
-      const boat = new THREE.Group(), hull = new THREE.Mesh(new THREE.SphereGeometry(1, 20, 12, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2), MAT.dark);
-      hull.scale.set(0.85, 0.55, 2.1); hull.castShadow = true; boat.add(hull);
-      const rim = new THREE.Mesh(new THREE.TorusGeometry(1, 0.06, 6, 28), MAT.wood); rim.rotation.x = Math.PI / 2; rim.scale.set(0.85, 2.1, 1); boat.add(rim);
-      for (const z of [-0.7, 0.5]) boat.add(box(1.5, 0.06, 0.32, MAT.wood, 0, -0.12, z));
-      for (const sx of [-1, 1]) { const oar = bar(V(sx * 0.8, -0.02, 0.1), V(sx * 2.3, -0.3, 0.5), 0.035, MAT.wood); boat.add(oar, box(0.1, 0.3, 0.5, MAT.wood, sx * 2.35, -0.32, 0.52)); }
+      // A clinker-built rowing boat: lapped planks over ribs, keel and stem, a transom, thwarts, floorboards,
+      // oars resting in their rowlocks, a coiled painter and a bailing bucket.
+      const boat = new THREE.Group();
+      {
+        const L = 2.15, BM = 0.82, sm = x => { x = Math.min(1, Math.max(0, x)); return x * x * (3 - 2 * x); };
+        const beam = u => BM * (1 - Math.pow(Math.max(0, (u - 0.42) / 0.58), 2.3)) * (0.62 + 0.38 * sm(u / 0.42));
+        const keelY = u => -0.36 + 0.34 * Math.pow(Math.max(0, (u - 0.62) / 0.38), 2.4) + 0.1 * Math.pow(1 - u, 3);
+        const gunY = u => 0.2 + 0.2 * Math.pow(Math.abs(u - 0.42) / 0.58, 2.2);
+        const zAt = (u, t) => -L + 2 * L * u + 0.22 * t * Math.pow(u, 5);          // the stem rakes forward a little
+        const pt = (u, t, side, out = 0) => { const b = beam(u), ky = keelY(u); return V(side * (b * Math.pow(t, 0.6) + out * Math.min(1, b * 8)), ky + (gunY(u) - ky) * Math.pow(t, 1.7), zAt(u, t)); };
+        const halfAt = (u, y) => { const ky = keelY(u), f = (y - ky) / (gunY(u) - ky); return f <= 0 ? 0 : beam(u) * Math.pow(Math.pow(Math.min(1, f), 1 / 1.7), 0.6); };
+        const grain = (base, streak, rx, ry) => { const t = grainTexture(base, streak); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(rx, ry); return t; };
+        const plankMat = new THREE.MeshStandardMaterial({ map: grain('#efe8da', '#5e4a36', 1, 1), vertexColors: true, roughness: 0.72, side: THREE.DoubleSide });
+        const oak = new THREE.MeshStandardMaterial({ map: grain('#c9965a', '#6a4220', 2, 1), roughness: 0.7 });
+        const pale = new THREE.MeshStandardMaterial({ map: grain('#e3bd84', '#8a5a2c', 2, 1), roughness: 0.7 });
+        const iron = new THREE.MeshStandardMaterial({ color: 0x3b3d40, metalness: 0.7, roughness: 0.45 });
+        const rope = new THREE.MeshStandardMaterial({ map: grain('#dccb9c', '#7d6a40', 8, 1), roughness: 1 });
+        const tube = (pts, r, mat, seg = 6) => { const m = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), pts.length * 3, r, seg), mat); m.castShadow = true; return m; };
+        // planking: seven strakes a side, each standing a little proud of the one below it
+        {
+          const pos = [], col = [], uv = [], idx = [], NS = 7, NU = 40, ROWS = 3;
+          for (const side of [-1, 1]) for (let k = 0; k < NS; k++) {
+            const shade = 0.9 + 0.1 * ((k * 5 + (side > 0 ? 2 : 0)) % 4) / 3, c = k === NS - 1 ? [0.93, 0.92, 0.86] : k < 2 ? [0.3 * shade, 0.2 * shade, 0.13 * shade] : [0.56 * shade, 0.32 * shade, 0.15 * shade];
+            const base = pos.length / 3;
+            for (let a = 0; a <= NU; a++) for (let b = 0; b <= ROWS; b++) {
+              const f = b / ROWS, p = pt(a / NU, (k + f) / NS, side, 0.024 * (1 - f));
+              pos.push(p.x, p.y, p.z); col.push(c[0], c[1], c[2]); uv.push(a / NU * 5, (k + f) / NS * 2);
+            }
+            for (let a = 0; a < NU; a++) for (let b = 0; b < ROWS; b++) { const q = base + a * (ROWS + 1) + b, n = q + ROWS + 1; idx.push(q, n, q + 1, q + 1, n, n + 1); }
+          }
+          for (const side of [-1, 1]) {                        // inside, the painted top plank is lined with bare wood
+            const base = pos.length / 3;
+            for (let a = 0; a <= NU; a++) for (let b = 0; b <= 1; b++) { const p = pt(a / NU, b ? 0.995 : (NS - 1) / NS - 0.01, side, -0.012); pos.push(p.x, p.y, p.z); col.push(0.6, 0.36, 0.18); uv.push(a / NU * 5, b * 0.3); }
+            for (let a = 0; a < NU; a++) { const q = base + a * 2; idx.push(q, q + 2, q + 1, q + 1, q + 2, q + 3); }
+          }
+          const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); g.setIndex(idx); g.computeVertexNormals();
+          const hull = new THREE.Mesh(g, plankMat); hull.castShadow = hull.receiveShadow = true; boat.add(hull);
+        }
+        // the transom closing the stern
+        {
+          const pos = [], uv = [], idx = [], N = 12;
+          for (let k = 0; k <= N; k++) for (const side of [-1, 1]) { const p = pt(0, k / N, side, 0.02); pos.push(p.x, p.y, p.z); uv.push(0.5 + p.x * 0.6, p.y * 1.2); }
+          for (let k = 0; k < N; k++) { const q = k * 2; idx.push(q, q + 1, q + 2, q + 1, q + 3, q + 2); }
+          const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); g.setIndex(idx); g.computeVertexNormals();
+          const m = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ map: oak.map, roughness: 0.7, side: THREE.DoubleSide })); m.castShadow = true; boat.add(m);
+          boat.add(box(beam(0) * 2 + 0.1, 0.05, 0.08, pale, 0, gunY(0) + 0.01, -L));
+        }
+        // keel running up into the stem, and the gunwale rails
+        { const pts = []; for (let k = 0; k <= 20; k++) { const u = k / 20; pts.push(V(0, keelY(u) - 0.025, zAt(u, 0))); }
+          for (let k = 1; k <= 8; k++) pts.push(V(0, keelY(1) + (gunY(1) + 0.1 - keelY(1)) * k / 8, zAt(1, k / 8) + 0.03));
+          boat.add(tube(pts, 0.036, oak)); }
+        for (const side of [-1, 1]) { const pts = []; for (let k = 0; k <= 24; k++) { const p = pt(k / 24, 1, side, 0.02); p.y += 0.012; pts.push(p); } boat.add(tube(pts, 0.032, pale, 8)); }
+        // ribs, steamed to the shape of the hull
+        for (let u = 0.07; u < 0.93; u += 0.078) { const pts = []; for (let k = 10; k >= 1; k--) pts.push(pt(u, k / 10, -1, -0.022)); for (let k = 0; k <= 10; k++) pts.push(pt(u, k / 10, 1, -0.022)); boat.add(tube(pts, 0.015, pale, 5)); }
+        // thwarts to sit on, a knee in the bow, and floorboards
+        for (const [u, deep] of [[0.11, 0.42], [0.42, 0.25], [0.68, 0.22]]) { const w = halfAt(u, 0.05) * 2 - 0.05; boat.add(box(w, 0.04, deep, pale, 0, 0.05, zAt(u, 0))); }
+        boat.add(box(halfAt(0.93, gunY(0.93) - 0.03) * 2, 0.04, 0.3, pale, 0, gunY(0.93) - 0.03, zAt(0.93, 0)));
+        for (const x of [-0.3, -0.15, 0, 0.15, 0.3]) { const u0 = Math.abs(x) > 0.2 ? 0.26 : 0.13, u1 = Math.abs(x) > 0.2 ? 0.69 : 0.74, z0 = zAt(u0, 0), z1 = zAt(u1, 0); boat.add(box(0.125, 0.025, z1 - z0, oak, x, -0.245, (z0 + z1) / 2)); }
+        // rowlocks, and the oars left resting in them with their blades trailing just clear of the water
+        const uL = 0.345, zL = zAt(uL, 0);
+        for (const side of [-1, 1]) {
+          const lock = pt(uL, 1, side, 0.02); boat.add(box(0.08, 0.035, 0.2, oak, lock.x, lock.y + 0.035, lock.z));
+          boat.add(bar(V(lock.x, lock.y + 0.04, lock.z), V(lock.x, lock.y + 0.085, lock.z), 0.012, iron));
+          const horn = new THREE.Mesh(new THREE.TorusGeometry(0.045, 0.011, 6, 14, Math.PI), iron); horn.rotation.set(0, Math.PI / 2, 0); horn.rotation.z = Math.PI; horn.position.set(lock.x, lock.y + 0.13, lock.z); boat.add(horn);
+          const dir = V(side * 1.75, -0.36, -0.5), len = 2.75, inboard = 0.72, at = V(lock.x, lock.y + 0.115, lock.z), oar = new THREE.Group();
+          dir.normalize(); oar.position.copy(at).addScaledVector(dir, -inboard); oar.quaternion.setFromUnitVectors(UP, dir);
+          const part = (geo, mat, y) => { const m = new THREE.Mesh(geo, mat); m.position.y = y; m.castShadow = true; oar.add(m); return m; };
+          part(new THREE.CylinderGeometry(0.019, 0.019, 0.2, 8), oak, 0.1);                          // the grip
+          part(new THREE.CylinderGeometry(0.03, 0.024, len - 0.85, 10), pale, 0.2 + (len - 0.85) / 2); // the loom
+          part(new THREE.CylinderGeometry(0.037, 0.037, 0.2, 10), MAT.dark, inboard);                 // leather where it bears on the rowlock
+          part(new THREE.TorusGeometry(0.04, 0.012, 6, 12), MAT.dark, inboard - 0.11).rotation.x = Math.PI / 2;
+          part(new THREE.CylinderGeometry(0.115, 0.03, 0.68, 16), pale, len - 0.34).scale.z = 0.13;    // the blade
+          part(new THREE.CylinderGeometry(0.117, 0.117, 0.035, 16), new THREE.MeshStandardMaterial({ color: COLS[0], roughness: 0.8 }), len - 0.02).scale.z = 0.14;   // its painted tip
+          boat.add(oar);
+        }
+        // the painter: made fast to a ring on the stem and coiled down in the bow
+        { const ring = new THREE.Mesh(new THREE.TorusGeometry(0.04, 0.009, 6, 12), iron); ring.position.set(0, gunY(1) - 0.02, zAt(1, 0.9) - 0.03); boat.add(ring);
+          const cz = zAt(0.82, 0), cy = keelY(0.82) + 0.1;
+          for (let k = 0; k < 4; k++) { const t = new THREE.Mesh(new THREE.TorusGeometry(0.17 - k * 0.028, 0.02, 6, 22), rope); t.rotation.x = Math.PI / 2; t.position.set(0.02 * (k % 2), cy + k * 0.036, cz + 0.01 * k); t.castShadow = true; boat.add(t); }
+          boat.add(tube([V(0, gunY(1) - 0.05, zAt(1, 0.9) - 0.04), V(0.03, gunY(0.95) - 0.16, zAt(0.95, 0) - 0.02), V(0.08, cy + 0.22, cz + 0.2), V(0.1, cy + 0.14, cz + 0.06)], 0.02, rope)); }
+        // a bailing bucket by the stern seat
+        { const b = new THREE.Group(), tin = new THREE.MeshStandardMaterial({ color: COLS[1 % COLS.length], roughness: 0.6, metalness: 0.3, side: THREE.DoubleSide });
+          b.add(new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.085, 0.2, 16, 1, true), tin)); const bot = new THREE.Mesh(new THREE.CircleGeometry(0.085, 16), tin); bot.rotation.x = -Math.PI / 2; bot.position.y = -0.098; b.add(bot);
+          const lip = new THREE.Mesh(new THREE.TorusGeometry(0.11, 0.008, 5, 18), iron); lip.rotation.x = Math.PI / 2; lip.position.y = 0.1; b.add(lip);
+          const handle = new THREE.Mesh(new THREE.TorusGeometry(0.11, 0.006, 5, 14, Math.PI), iron); handle.rotation.x = 0.9; handle.position.y = 0.1; b.add(handle);
+          b.position.set(0.22, -0.13, zAt(0.3, 0)); b.rotation.z = 0.06; b.traverse(o => { o.castShadow = true; }); boat.add(b); }
+        // the sea is kept out of the inside: an unseen lid below the gunwale that the water cannot be drawn through
+        boat.traverse(o => { o.renderOrder = -2; });
+        { const pos = [], idx = [], N = 30, y = 0.1;
+          for (let k = 0; k <= N; k++) { const u = k / N, h = halfAt(u, y) * 0.98; pos.push(-h, y, zAt(u, 0.6), h, y, zAt(u, 0.6)); if (k < N) { const q = k * 2; idx.push(q, q + 1, q + 2, q + 1, q + 3, q + 2); } }
+          const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setIndex(idx);
+          const lid = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ colorWrite: false, side: THREE.DoubleSide })); lid.renderOrder = -1; boat.add(lid); }
+      }
       const bp = on(toMeadow + 0.5, 25); boat.position.set(bp.x, BAY.level + 0.12, bp.z); boat.rotation.y = 0.8; scene.add(boat);
       play.deco.push({ kind: 'boat', o: boat, ph: 1.3, x: bp.x, z: bp.z });
       for (const [da, r, len, turn] of [[0.25, 36.5, 3.2, 0.4], [-0.35, 37.5, 2.2, 1.9], [0.9, 36, 2.6, 2.6]]) {
@@ -1438,6 +1556,14 @@ function step(dtReal) {
     }
     if (player.perch && HERO.fly) sitLegs(flyW);
     if (player.swim && HERO.fly) swimLimbs(flyW, stroke);
+    throwW += ((THROW.proc && (aiming || heroKick > 0) ? 1 : 0) - throwW) * Math.min(1, dtReal * 12);
+    const tA = flyBones.RightArm, tF = flyBones.RightForeArm, tH = flyBones.RightHand;
+    if (throwW > 0.01 && THROW.proc && tA && tF && tH) {         // drawn back over her shoulder while she aims, whipped forward as she lets go
+      const q = aiming ? 0 : Math.min(1, (1 - heroKick) * 2.6), e = q * q * (3 - 2 * q);
+      hero.getWorldQuaternion(sitQ);
+      aimBone(tA.bone, tF.bone, sitD.set(-0.5 + 0.3 * e, 0.7 - 0.8 * e, 0.5 - 1.5 * e).normalize().applyQuaternion(sitQ), throwW);
+      aimBone(tF.bone, tH.bone, sitD.set(-0.15, 0.95 - 1.05 * e, 0.25 - 1.25 * e).normalize().applyQuaternion(sitQ), throwW);
+    }
   }
 
   showAim();
