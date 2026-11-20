@@ -824,11 +824,12 @@ function clearLevel() {
   for (const o of [...objs]) removeObj(o);
   pendingBurst.clear(); sites.length = 0;
 }
+const TOWERS = false;                                        // set true to bring the lantern towers (and levels) back
 function buildLevel() {
   clearLevel();
   const rng = mulberry(level * 7919 + 17);
-  const n = Math.min(3 + level, 10);
-  sites.push({ x: START.x + (level === 1 ? 0 : (rng() - 0.5) * 8), z: START.z - 11 });           // one straight ahead, so there is something to hit at once
+  const n = TOWERS ? Math.min(3 + level, 10) : 0;          // no towers for now: the meadow is left open to play in
+  if (TOWERS) sites.push({ x: START.x + (level === 1 ? 0 : (rng() - 0.5) * 8), z: START.z - 11 });           // one straight ahead, so there is something to hit at once
   for (let tries = 0; sites.length < n && tries < 600; tries++) {
     const a = rng() * Math.PI * 2, rad = 5 + Math.sqrt(rng()) * (R - 9), x = Math.cos(a) * rad, z = Math.sin(a) * rad;
     if (Math.hypot(x - START.x, z - START.z) < 9) continue;
@@ -859,7 +860,7 @@ const elLvl = document.getElementById('lvl'), elLeft = document.getElementById('
   elFade = document.getElementById('fade'), elHint = document.getElementById('hint'),
   elJoy = document.getElementById('joy'), elKnob = document.getElementById('knob');
 if (localStorage.getItem('lanternfall.played')) elHint.classList.add('off');
-function hud() { elLvl.textContent = level; elLeft.textContent = lanterns.length; }
+function hud() { elLvl.textContent = level; elLeft.textContent = lanterns.length; elLvl.style.display = TOWERS ? '' : 'none'; elLeft.parentElement.style.display = TOWERS ? '' : 'none'; }
 document.getElementById('hero').addEventListener('click', e => { e.stopPropagation(); if (swapHero()) sfx.chime(2); });
 document.getElementById('restart').addEventListener('click', e => { e.stopPropagation(); transition(false); });
 function transition(next) {
@@ -990,7 +991,7 @@ function burst(o) {
   fireflies(p.x, p.y, p.z, 14);
   sfx.chime(combo++); comboT = 2.5; slowT = 0.12; shake = Math.max(shake, 0.1);
   removeObj(o); hud();
-  if (lanterns.length === 0 && state === 'play') { state = 'won'; stateT = 0; sfx.win(); }
+  if (total > 0 && lanterns.length === 0 && state === 'play') { state = 'won'; stateT = 0; sfx.win(); }
 }
 // A tree to a fireball: a trunk, and a crown shaped like a flattened ball. It bounces off either.
 function ballTree(o, tx, tz, ty, m) {
