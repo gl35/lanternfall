@@ -72,7 +72,7 @@ function pickClips() {
 const HEROES = [
   { file: 'general-animated.glb', scale: 2.5, turn: Math.PI, lift: 0, speed: 4.8, hand: 2.15, cam: 0 },
   { file: 'warrior.glb', scale: 4.4, turn: Math.PI, lift: 0.489, speed: 9.5, hand: 3.3, cam: 1, mount: true },
-  { file: 'woman.glb', scale: 2.05, turn: Math.PI, lift: 0, speed: 5.0, hand: 1.9, cam: -0.05, glide: true },   // modelled in one fixed pose, with no clips: she drifts over the grass
+  { file: 'woman.glb', scale: 2.7, turn: Math.PI, lift: 0, speed: 5.0, hand: 2.15, cam: 0, glide: true },   // modelled in one fixed pose, with no clips: she drifts over the grass
   { file: 'kid.glb', scale: 1.9, turn: Math.PI, lift: 0, speed: 5.4, hand: 1.6, cam: -0.2 },   // a copy of the kid, made when her model loads
 ];
 const KID = 3;
