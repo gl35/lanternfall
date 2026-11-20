@@ -815,6 +815,28 @@ const play = { swing: null, hammock: null, spots: [] };
     play.sand = { x: g.position.x, z: g.position.z, g, r: 1.5, seat: g, rider: false, pose: KID_POSE.hold, sit: 'slide', fort, built: 0, exit: world(g, 0, -2.9), exitTurn: Math.PI,
       put(k) { k.position.set(0.1, 0.13 - 0.84, -0.25); k.rotation.set(0, 0, 0); } };
   }
+  {
+    const COLS = [0xe2503c, 0xf2c230, 0x3f8fd6, 0x55b86a, 0xe85a9a, 0xf08a3c];
+    const gateway = (t, wide, tall) => {
+      const a = valleyAt(t, -wide), b = valleyAt(t, wide), ya = hillHeight(a.x, a.z), yb = hillHeight(b.x, b.z);
+      scene.add(bar(V(a.x, ya, a.z), V(a.x, ya + tall, a.z), 0.12, MAT.wood), bar(V(b.x, yb, b.z), V(b.x, yb + tall, b.z), 0.12, MAT.wood));
+      const N = 15; for (let k = 0; k < N; k++) {
+        const u = (k + 0.5) / N, sag = Math.sin(u * Math.PI) * 1.1, x = a.x + (b.x - a.x) * u, z = a.z + (b.z - a.z) * u, y = ya + (yb - ya) * u + tall - sag;
+        const f = new THREE.Mesh(new THREE.ConeGeometry(0.34, 0.75, 3), new THREE.MeshStandardMaterial({ color: COLS[k % COLS.length], roughness: 0.8, side: THREE.DoubleSide }));
+        f.position.set(x, y - 0.38, z); f.rotation.set(Math.PI, yaw, 0); f.scale.z = 0.12; scene.add(f);
+      }
+      for (const p of [[a, ya], [b, yb]]) for (let k = 0; k < 3; k++) {                    // balloons tied to each post
+        const bl = new THREE.Mesh(sphereGeo, new THREE.MeshStandardMaterial({ color: COLS[(k * 2 + (p[0] === a ? 0 : 3)) % COLS.length], roughness: 0.3 }));
+        bl.scale.set(0.42, 0.52, 0.42); bl.position.set(p[0].x + (k - 1) * 0.5, p[1] + tall + 1.2 + k * 0.45, p[0].z + (k % 2) * 0.4); bl.castShadow = true; scene.add(bl);
+        scene.add(bar(V(p[0].x, p[1] + tall, p[0].z), bl.position.clone().add(V(0, -0.5, 0)), 0.012, STEEL));
+      }
+    };
+    gateway(41, 5.5, 5.2); gateway(53, 7, 4.2);
+    const c = at(0, 0);                                         // a big bunch high over the middle of the playground, seen from across the meadow
+    scene.add(bar(V(c.x, 0, c.z), V(c.x, 7.5, c.z), 0.07, STEEL));
+    for (let k = 0; k < 9; k++) { const a = k * 2.4, r = 0.5 + (k % 3) * 0.35, bl = new THREE.Mesh(sphereGeo, new THREE.MeshStandardMaterial({ color: COLS[k % COLS.length], roughness: 0.3 })); bl.scale.set(0.6, 0.74, 0.6); bl.position.set(c.x + Math.cos(a) * r, 8.4 + (k % 4) * 0.55, c.z + Math.sin(a) * r); scene.add(bl); }
+    play.spots.push({ x: c.x, z: c.z, r: 0.5 });
+  }
   play.field = at(0, 0);
 }
 const RIDES = ['swing', 'hammock', 'round', 'seesaw', 'slide', 'bars', 'sand'];
