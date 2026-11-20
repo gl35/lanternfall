@@ -310,7 +310,7 @@ function playerDismount() {
   player.x = kid.x; player.z = kid.z; player.face = Math.PI - kid.face; hero.rotation.y = -player.face; hero.visible = true;
   player.vy = JUMP_V * 0.6; player.y = 0.01;                                      // hops down
 }
-const SWAP = [0, KID, 2, 1];                                // the general, the kid, the warrior woman, the rider
+const SWAP = [0, KID];                                      // he can be the general or the kid; the warrior woman and the rider only stand about
 function swapHero() {
   playerDismount(); player.y = 0; player.vy = 0;
   const ready = ix => heroCache[HEROES[ix].file] && (ix === KID ? kid.mixer : ix === 1 ? npc.loaded : ix === 2 ? stand2.on : true);
