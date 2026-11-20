@@ -1308,9 +1308,11 @@ function movePlayer(dt) {
   {
     const feet = player.g + player.y;
     castle.resolve(player, feet, HERO.mount ? 1.2 : 0.45);
-    const g2 = castle.groundAt(player.x, player.z, feet), drop = feet - g2;
+    let g2 = castle.groundAt(player.x, player.z, feet);
+    if (Math.hypot(player.x - BAY.x, player.z - BAY.z) < BAY.r) g2 = Math.max(g2, BAY.level - 0.85);   // in the cove he wades, waist deep at most
+    const drop = feet - g2;
     player.y = player.y <= 0.001 && drop < 0.5 ? 0 : Math.max(0, drop);     // small steps and slopes are just walked; a real drop is a fall
-    player.g = Math.hypot(player.x - BAY.x, player.z - BAY.z) < BAY.r ? Math.max(g2, BAY.level - 0.85) : g2;   // in the cove he wades, waist deep at most
+    player.g = g2;
   }
   for (const o of objs) if (o.kind !== 'ball' && o.body.position.y < 2.4 + player.y && o.body.position.y > player.y - 0.5) push(o.body.position.x, o.body.position.z, 1.0);
 }
