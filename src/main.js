@@ -150,7 +150,8 @@ const kid = { x: START.x + 7, z: START.z - 4, face: 0, group: new THREE.Group(),
     kid.model = m;
     kid.mixer = new THREE.AnimationMixer(m);
     for (const c of g.animations) kid.acts[c.name] = kid.mixer.clipAction(c);
-    const twin = cloneSkinned(m); twin.rotation.y = Math.PI; heroCache['kid.glb'] = { scene: twin, animations: g.animations };   // the one he can steer
+    const twin = cloneSkinned(m); twin.rotation.y = Math.PI;
+    twin.traverse(o => { if (o.isBone) flyBones[o.name.replace(/^mixamorig:?/, '')] = { bone: o, bind: o.quaternion.clone() }; }); heroCache['kid.glb'] = { scene: twin, animations: g.animations };   // the one he can steer
     kid.group.add(m); kidPlay('idle');
   }, undefined, e => console.error('kid model failed to load', e));
 }
@@ -165,7 +166,9 @@ const KID_POSE = {
   stand: { LeftArm: [58, 0, 0], RightArm: [58, 0, 0] },                                                                           // standing on the plank, hands up on the ropes
   lie: { LeftArm: [-72, 0, 0], RightArm: [-72, 0, 0] },                                                                            // arms by the sides
 };
-const kidE = new THREE.Euler(), kidQ = new THREE.Quaternion(), D2R = Math.PI / 180;
+const flyBones = {}, FLY_POSE = { LeftArm: [100, 0, 0], RightArm: [100, 0, 0], LeftForeArm: [0, 0, 0], RightForeArm: [0, 0, 0], LeftHand: [0, 0, 0], RightHand: [0, 0, 0] };   // arms straight out ahead of her
+let flyW = 0;
+const kidE = new THREE.Euler(), kidQ = new THREE.Quaternion(), kidQ2 = new THREE.Quaternion(), D2R = Math.PI / 180;
 function kidPose() {
   for (const n in kid.pose) { const b = kid.bones[n]; if (!b) continue; const [x, y, z] = kid.pose[n]; b.bone.quaternion.copy(b.bind).multiply(kidQ.setFromEuler(kidE.set(x * D2R, y * D2R, z * D2R))); }
 }
@@ -1085,6 +1088,11 @@ function step(dtReal) {
     }
     if (mode === 'walk') heroAct.timeScale = 0.6 + player.moving * 1.5;
     mixer.update(dtReal);
+    flyW += ((heroMode === 'fly' ? 1 : 0) - flyW) * Math.min(1, dtReal * 8);
+    if (flyW > 0.01 && HERO.fly) for (const n in FLY_POSE) {
+      const b = flyBones[n]; if (!b) continue; const [x, y, z] = FLY_POSE[n];
+      b.bone.quaternion.slerp(kidQ.copy(b.bind).multiply(kidQ2.setFromEuler(kidE.set(x * D2R, y * D2R, z * D2R))), flyW);
+    }
   }
 
   showAim();
@@ -1119,7 +1127,7 @@ function frame(now) {
 // Scripted stepping for tests (the preview pane only runs frames while visible).
 window.game = {
   step(seconds = 1, dt = 1 / 60) { window.__manual = true; for (let t = 0; t < seconds; t += dt) step(dt); renderer.render(scene, camera); return this.state(); },
-  fling, jump, setHero, swapHero, beacons, motes, lightBeacon, debug: { WOODS, npc, kid, stand, stand2, play, KID_POSE, kidMount, kidDismount, scene, camera, hero, acts, THROW, THREE, player, sites, renderer, get mixer() { return mixer; } },
+  fling, jump, setHero, swapHero, beacons, motes, lightBeacon, debug: { FLY_POSE, WOODS, npc, kid, stand, stand2, play, KID_POSE, kidMount, kidDismount, scene, camera, hero, acts, THROW, THREE, player, sites, renderer, get mixer() { return mixer; } },
   walk(x, y) { window.__joy = x || y ? { x, y } : null; },
   setLevel(n) { level = n; buildLevel(); },
   setSeason(name) { scenery.setSeason(name); },
