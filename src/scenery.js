@@ -648,12 +648,12 @@ function tree(r, bareGeo) {
     [-1.2, 4.3, 0.9, 0.9], [1.3, 4.4, 0.7, 0.88], [0.1, 4.2, -1.3, 0.9], [-2.3, 3.4, -0.6, 0.8], [2.3, 3.5, 0.7, 0.78], [0, 5.3, -0.1, 0.75],
     [-1.4, 3.1, -1.6, 0.75], [1.6, 3.0, -1.5, 0.75]];
   // limbs forking from the top of the trunk into the crown
-  const limbs = [], up = new THREE.Vector3(0, 1, 0), from = new THREE.Vector3(0.14, 2.7, 0), q = new THREE.Quaternion();
+  const limbs = [], ends = [], up = new THREE.Vector3(0, 1, 0), from = new THREE.Vector3(0.14, 2.7, 0), q = new THREE.Quaternion();
   for (const i of [1, 2, 4, 5, 3]) {
     const to = new THREE.Vector3(puffs[i][0], puffs[i][1] - 0.1, puffs[i][2]), dir = to.clone().sub(from), len = dir.length() * 0.85;
     const lg = new THREE.CylinderGeometry(0.05, 0.15, len, 8, 1, true);
     lg.applyQuaternion(q.setFromUnitVectors(up, dir.normalize())); lg.translate(from.x + dir.x * len / 2, from.y + dir.y * len / 2, from.z + dir.z * len / 2);
-    limbs.push(lg);
+    limbs.push(lg); ends.push([from.clone(), from.clone().addScaledVector(dir, len)]);
   }
   const limbMesh = new THREE.Mesh(mergeGeometries(limbs), trunkMat); limbMesh.castShadow = true; g.add(limbMesh);
   for (const [x, y, z, s] of puffs) {
@@ -662,7 +662,7 @@ function tree(r, bareGeo) {
   }
   const bare = new THREE.Mesh(bareGeo, twigMat); bare.castShadow = true; bare.visible = false;
   g.add(leaves, bare);
-  g.userData = { leaves, bare, puffs };
+  g.userData = { leaves, bare, puffs, limbs: ends };
   return g;
 }
 
@@ -714,6 +714,8 @@ export function buildScenery(scene) {
     scene.add(m); trees.push(m);
   });
   const foliage = leafCloud(r, U, trees); scene.add(foliage);
+  const LEAVES_PER = foliage.userData.full / trees.length;   // leaves are laid down tree by tree, so the last trees can simply go without
+  foliage.userData.full = Math.round(LEAVES_PER * (trees.length - 4)); foliage.count = foliage.userData.full;
   const land = hills(); scene.add(land);
   const woods = hillWoods(r, U, bareGeos[0]); scene.add(woods);
   let detailQ = 1, lodT = -1;
@@ -766,6 +768,13 @@ export function buildScenery(scene) {
     // 0.3 .. 1: draw that fraction of the grass and leaves (instances are in random order, so it thins evenly)
     setDetail(q) { detailQ = q; lodT = -1; for (const m of [grassNear, grassFar, foliage, woods.userData.leaves]) m.count = Math.floor(m.userData.full * q); },
     get season() { return season; },
+    // a tree is bare when (nearly) none of its leaves are being drawn
+    isBare(i) { return season !== 'summer' || (foliage.count - i * LEAVES_PER) / LEAVES_PER < 0.35; },
+    // the limbs of tree i as world-space segments, each with the radius of the limb along it
+    limbs(i) {
+      const t = trees[i]; t.updateMatrixWorld(true);
+      return t.userData.limbs.map(([a, b]) => ({ a: a.clone().applyMatrix4(t.matrixWorld), b: b.clone().applyMatrix4(t.matrixWorld), r0: 0.15 * t.scale.x, r1: 0.05 * t.scale.x }));
+    },
     update(t, px, pz, camera, pixelRatio = 1, py = 0) {
       U.time.value = t; U.center.value.set(px, pz);
       if (woods.visible && Math.abs(t - lodT) > 0.2) { lodT = t; woods.userData.lod(px, pz, detailQ); } sea.group.rotation.y = t * 0.003; heaps.rotation.y = t * 0.0016;

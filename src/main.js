@@ -168,6 +168,7 @@ const KID_POSE = {
 };
 const flyBones = {}, FLY_POSE = { LeftArm: [20, 0, 0], RightArm: [20, 0, 0], LeftForeArm: [0, 0, 0], RightForeArm: [0, 0, 0], LeftHand: [0, 0, 0], RightHand: [0, 0, 0] };   // arms straight out to the sides, like wings
 let flyW = 0, wingW = 0;
+const SIT_POSE = { LeftUpLeg: [-82, 0, 0], RightUpLeg: [-82, 0, 0], LeftLeg: [78, 0, 0], RightLeg: [78, 0, 0], LeftArm: [-58, 0, 0], RightArm: [-58, 0, 0] };
 const FLY_ZERO = [0, 0, 0];
 // Her wings: a modelled pair, cut down the middle into a left and a right so each can beat from her back.
 const wings = new THREE.Group(), wingP = new THREE.Vector3();
@@ -305,7 +306,40 @@ function playerDismount() {
   player.vy = JUMP_V * 0.6; player.y = 0.01;                                      // hops down
 }
 const SWAP = [0, KID];                                      // he can be the general or the kid; the warrior woman and the rider only stand about
+// Flying, she can settle on a limb of a bare tree: near enough to one and not climbing, she sits down on it.
+let PERCH = null;
+function perches() {
+  if (PERCH) return PERCH;
+  PERCH = [];
+  TREES.forEach((t, i) => scenery.limbs(i).forEach(l => {
+    const k = 0.58, x = l.a.x + (l.b.x - l.a.x) * k, y = l.a.y + (l.b.y - l.a.y) * k, z = l.a.z + (l.b.z - l.a.z) * k;
+    PERCH.push({ tree: i, x, y: y + l.r0 + (l.r1 - l.r0) * k, z, dx: l.b.x - l.a.x, dz: l.b.z - l.a.z });
+  }));
+  return PERCH;
+}
+const SEAT = 1.34;                                           // how far below her hips her feet hang when she sits
+function tryPerch() {
+  if (heroIx !== KID || !player.flying || player.vy > 3 || player.perchLock > 0) return false;
+  const py = player.g + player.y + SEAT;
+  for (const p of perches()) {
+    if (!scenery.isBare(p.tree) || Math.hypot(p.x - player.x, p.z - player.z) > 1.15 || Math.abs(p.y - py) > 1.0) continue;
+    const out = Math.hypot(p.x - TREES[p.tree].x, p.z - TREES[p.tree].z) || 1, l = Math.hypot(p.dx, p.dz) || 1;
+    let fx = -p.dz / l, fz = p.dx / l;                       // she sits across the limb, looking toward where she flew in from
+    if (fx * (player.x - p.x) + fz * (player.z - p.z) > 0) { fx = -fx; fz = -fz; }
+    player.perch = p; player.flying = false; player.vy = 0; player.moving = 0; player.perchFree = false;
+    player.x = p.x + fx * 0.12; player.z = p.z + fz * 0.12; player.g = hillHeight(player.x, player.z); player.y = p.y - SEAT - player.g; player.face = Math.atan2(fx, -fz);
+    fireflies(p.x, p.y + 0.4, p.z, 10, false); sfx.chime(5);
+    return true;
+  }
+  return false;
+}
+function leavePerch(up) {
+  if (!player.perch) return;
+  player.perch = null; player.perchLock = 0.9; player.flying = true; player.vy = up ? 6.4 : 2.5;
+  if (up) sfx.whoosh(0.15);
+}
 function swapHero() {
+  player.perch = null;
   playerDismount(); player.y = 0; player.vy = 0;
   const ready = ix => heroCache[HEROES[ix].file] && (ix === KID ? kid.mixer : ix === 1 ? npc.loaded : ix === 2 ? stand2.on : true);
   const from = heroIx; let to = from;
@@ -694,7 +728,7 @@ function buildLevel() {
   });
   total = lanterns.length;
   scenery.setSeason(seasonFor(level));
-  playerDismount(); player.y = 0; player.vy = 0; player.rideLock = null; player.flying = false;
+  playerDismount(); player.y = 0; player.vy = 0; player.rideLock = null; player.flying = false; player.perch = null;
   player.x = START.x; player.z = START.z; player.face = 0; camYaw = 0; camReady = false;
   state = 'play'; stateT = 0; combo = 0; cooldown = 0;
   hud();
@@ -980,6 +1014,7 @@ function updateHills(dt) {
 
 function jump() {
   if (player.ride) { playerDismount(); return true; }
+  if (player.perch) { leavePerch(true); return true; }
   if (HERO.fly && player.y > 0.01) {
     if (state !== 'play' || player.y > 18) return false;
     player.vy = 6.4; player.flying = true; sfx.whoosh(0.15); fireflies(player.x, player.g + player.y + 0.6, player.z, 6, false);
@@ -990,11 +1025,18 @@ function jump() {
   return true;
 }
 function movePlayer(dt) {
+  player.perchLock = Math.max(0, (player.perchLock || 0) - dt);
+  if (player.perch) {                                        // sitting on a limb: the stick, let go and pushed again, slips her off
+    const l = window.__joy ? Math.hypot(window.__joy.x, window.__joy.y) : Math.hypot(joy.x, joy.y) + (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].some(k => keys.has(k)) ? 1 : 0);
+    if (l < 0.12) player.perchFree = true; else if (player.perchFree) leavePerch(false);
+    if (player.perch) return;
+  }
   if (player.y > 0 || player.vy > 0) {
     const fl = HERO.fly && player.flying;
     player.vy -= GRAVITY * (fl ? 0.55 : 1) * dt; if (fl && player.vy < -2.4) player.vy = -2.4;      // she drifts down
     player.y += player.vy * dt;
     if (fl) { player.trail = (player.trail || 0) - dt; if (player.trail <= 0) { player.trail = 0.08; fireflies(player.x, player.g + player.y + 0.3, player.z, 1, false); } }
+    if (tryPerch()) return;
     if (player.y <= 0) { player.y = 0; player.vy = 0; player.flying = false; dust(player.x, player.g + 0.15, player.z, 3); sfx.thump(0.25); }
   }
   let jx = joy.x, jy = joy.y;
@@ -1027,7 +1069,7 @@ function movePlayer(dt) {
     const dx = player.x - ox, dz = player.z - oz, dd = Math.hypot(dx, dz);
     if (dd < rad && dd > 1e-4) { player.x = ox + dx / dd * rad; player.z = oz + dz / dd * rad; }
   };
-  for (const t of TREES) push(t.x, t.z, 0.7 * t.s + 0.6);
+  TREES.forEach((t, i) => push(t.x, t.z, player.flying && scenery.isBare(i) ? 0.45 * t.s + 0.35 : 0.7 * t.s + 0.6));
   if (!npc.away) push(npc.x, npc.z, npc.r + (HERO.mount ? 1 : 0)); if (!kid.ride && !kid.away) push(kid.x, kid.z, 0.9); for (const st of [stand, stand2]) if (st.on) push(st.x, st.z, 1.1);
   if (heroIx === KID && player.y <= 0) for (const kind of ['swing', 'hammock']) {
     const e = play[kind], dd = Math.hypot(player.x - e.x, player.z - e.z), rad = kind === 'swing' ? 1.7 : 1.5;
@@ -1051,7 +1093,7 @@ function updateCamera(dtReal) {
   const blocked = (d, k) => { const x = player.x - tmpF.x * d, z = player.z - tmpF.z * d; return TREES.some(t => Math.hypot(x - t.x, z - t.z) < k * t.s) || near.some(t => Math.hypot(x - t.x, z - t.z) < k * 0.75 * t.r); };
   while (D > 3 && blocked(D, 4.6)) D -= 0.5;
   if (D <= 3) { H = 2.3; D = D0 * 0.75; while (D > 1.6 && blocked(D, 1.2)) D -= 0.4; }
-  const lift = player.y * (player.flying ? 0.9 : 0.5);
+  const lift = player.y * (player.flying || player.perch ? 0.9 : 0.5);
   camPos.set(player.x - tmpF.x * D, H + player.g + lift, player.z - tmpF.z * D);
   camPos.y = Math.max(camPos.y, hillHeight(camPos.x, camPos.z) + 1.6);                        // never under a slope behind him
   const ax = player.x + tmpF.x * 7, az = player.z + tmpF.z * 7;                                 // look along the slope he is on
@@ -1102,12 +1144,12 @@ function step(dtReal) {
   else heroTilt.rotation.set(-0.16 * fake + tuck, 0, stride * 0.05 * fake);
   if (heroLoaded) {
     heroKick = Math.max(0, heroKick - dtReal / THROW.hold);
-    const mode = state === 'won' ? 'win' : heroKick > 0 ? 'throw' : aiming ? 'aim' : air && player.flying && CLIP.jump ? 'fly' : air && CLIP.jump ? 'jump' : player.moving > 0.25 && CLIP.walk ? 'walk' : 'idle';
+    const mode = state === 'won' ? 'win' : heroKick > 0 ? 'throw' : aiming ? 'aim' : player.perch && CLIP.jump ? 'perch' : air && player.flying && CLIP.jump ? 'fly' : air && CLIP.jump ? 'jump' : player.moving > 0.25 && CLIP.walk ? 'walk' : 'idle';
     if (mode !== heroMode) {
       if (mode === 'win') heroPlay(CLIP.win || CLIP.idle, { fade: 0.4 });
       else if (mode === 'aim') heroPlay(THROW.clip, { fade: 0.18, speed: 0, at: THROW.wind });
       else if (mode === 'throw') heroPlay(THROW.clip, { fade: 0.08, speed: THROW.speed, once: true, at: heroMode === 'aim' ? null : THROW.wind });
-      else if (mode === 'fly') heroPlay(CLIP.jump, { fade: 0.15, speed: 0, at: HOP.t0 + (HOP.t1 - HOP.t0) * 0.5 });
+      else if (mode === 'fly' || mode === 'perch') heroPlay(CLIP.jump, { fade: 0.15, speed: 0, at: HOP.t0 + (HOP.t1 - HOP.t0) * 0.5 });
       else if (mode === 'jump') heroPlay(CLIP.jump, { fade: 0.08, once: true, at: HOP.t0, speed: (HOP.t1 - HOP.t0) / (2 * JUMP_V / GRAVITY) });
       else if (mode === 'walk') heroPlay(CLIP.walk, { fade: 0.2 });
       else heroPlay(CLIP.idle, { fade: 0.35 });
@@ -1115,7 +1157,8 @@ function step(dtReal) {
     }
     if (mode === 'walk') heroAct.timeScale = HERO.stroll ? 0.7 + player.moving * 1.0 : 0.6 + player.moving * 1.5;
     mixer.update(dtReal);
-    flyW += ((heroMode === 'fly' ? 1 : 0) - flyW) * Math.min(1, dtReal * 8);
+    flyW += ((heroMode === 'fly' || player.perch ? 1 : 0) - flyW) * Math.min(1, dtReal * 8);
+    const POSE = player.perch ? SIT_POSE : FLY_POSE;
     wings.visible = heroIx === KID && player.flying && player.y > 0 && !!flyBones.Spine2 && !!wings.userData.ready;   // hers alone, and only in the air
     if (wings.visible) {                                           // they sit between her shoulder blades and beat
       wingW += (1 - wingW) * Math.min(1, dtReal * 7);
@@ -1125,7 +1168,7 @@ function step(dtReal) {
       wings.children[0].rotation.set(0, -beat, fold); wings.children[1].rotation.set(0, beat, -fold);
     } else wingW = 0;
     if (flyW > 0.01 && HERO.fly) for (const n in flyBones) {
-      const b = flyBones[n], [x, y, z] = FLY_POSE[n] || FLY_ZERO;
+      const b = flyBones[n], [x, y, z] = POSE[n] || FLY_ZERO;
       b.bone.quaternion.slerp(kidQ.copy(b.bind).multiply(kidQ2.setFromEuler(kidE.set(x * D2R, y * D2R, z * D2R))), flyW);
     }
   }
@@ -1162,7 +1205,7 @@ function frame(now) {
 // Scripted stepping for tests (the preview pane only runs frames while visible).
 window.game = {
   step(seconds = 1, dt = 1 / 60) { window.__manual = true; for (let t = 0; t < seconds; t += dt) step(dt); renderer.render(scene, camera); return this.state(); },
-  fling, jump, setHero, swapHero, beacons, motes, lightBeacon, debug: { FLY_POSE, WING, wings, WOODS, npc, kid, stand, stand2, play, KID_POSE, kidMount, kidDismount, scene, camera, hero, acts, THROW, THREE, player, sites, renderer, get mixer() { return mixer; } },
+  fling, jump, setHero, swapHero, beacons, motes, lightBeacon, debug: { FLY_POSE, SIT_POSE, perches, scenery, WING, wings, WOODS, npc, kid, stand, stand2, play, KID_POSE, kidMount, kidDismount, scene, camera, hero, acts, THROW, THREE, player, sites, renderer, get mixer() { return mixer; } },
   walk(x, y) { window.__joy = x || y ? { x, y } : null; },
   setLevel(n) { level = n; buildLevel(); },
   setSeason(name) { scenery.setSeason(name); },
