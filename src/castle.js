@@ -29,7 +29,7 @@ export function buildCastle(scene, { spawn, sfx, addBox }) {
   solid(-S, S, -S, -S + 0.5, WH + 1.1, WH); solid(-S, S, S - 0.5, S, WH + 1.1, WH);
   solid(-S, -S + 0.5, -S + 0.5, S - 0.5, WH + 1.1, WH); solid(S - 0.5, S, -S + 0.5, S - 0.5, WH + 1.1, WH);
   // turrets at the corners and either side of the gate (drawn round, solid as squares)
-  const TURRETS = [[-S, -S, 3.3, 11], [S, -S, 3.3, 11], [-S, S, 3.3, 11], [S, S, 3.3, 11], [-5.6, S + 1.6, 2.5, 9.5], [5.6, S + 1.6, 2.5, 9.5]];
+  const TURRETS = [[-S, -S, 3.5, 14.5], [S, -S, 3.5, 13], [-S, S, 3.5, 13], [S, S, 3.5, 15.5], [-5.6, S + 1.6, 2.7, 11.5], [5.6, S + 1.6, 2.7, 11.5]];
   for (const [x, z, r, h] of TURRETS) solid(x - r * 0.72, x + r * 0.72, z - r * 0.72, z + r * 0.72, h, 0, { draw: false });
   // stairs from the yard up to the wall walk, one each side
   solid(-S + T, -S + T + 2.4, -7, 7, { axis: 'z', a: 7, b: -7, ha: 0, hb: WH }); solid(-S + T, -S + T + 2.4, -10, -7, WH);
@@ -48,23 +48,41 @@ export function buildCastle(scene, { spawn, sfx, addBox }) {
   solid(-19.5, -17.9, 14.5, 16.1, 0.8); solid(-17.8, -16.2, 15, 16.6, 0.8); solid(-18.8, -17.2, 14.9, 16.5, 1.6, 0.8); solid(15, 17, -15, -13, 1.1);   // crates
 
   // ---------- drawing it ----------
-  const stoneTex = (() => {
-    const c = document.createElement('canvas'); c.width = c.height = 256; const g = c.getContext('2d');
-    g.fillStyle = '#cfc7b6'; g.fillRect(0, 0, 256, 256);
-    for (let row = 0; row < 4; row++) for (let k = 0; k < 3; k++) {
-      const x = (k * 86 + (row % 2) * 43) % 256, y = row * 64, v = 196 + Math.floor(Math.random() * 30);
-      g.fillStyle = `rgb(${v + 6},${v},${v - 14})`; g.fillRect(x + 2, y + 2, 82, 60); if (x + 84 > 256) g.fillRect(x - 256 + 2, y + 2, 82, 60);
+  const [stoneTex, stoneBump] = (() => {
+    const N = 512, c = document.createElement('canvas'), b = document.createElement('canvas'); c.width = c.height = b.width = b.height = N;
+    const g = c.getContext('2d'), h = b.getContext('2d'), ROWS = 8, RH = N / ROWS;
+    g.fillStyle = '#6f6a60'; g.fillRect(0, 0, N, N); h.fillStyle = '#202020'; h.fillRect(0, 0, N, N);       // mortar
+    for (let row = 0; row < ROWS; row++) {
+      let x = -Math.random() * 60;
+      while (x < N) {
+        const w = 46 + Math.random() * 70, v = 150 + Math.random() * 46, warm = 6 + Math.random() * 16, y = row * RH;
+        const hv = 170 + Math.random() * 70;
+        const draw = ox => {
+          g.fillStyle = `rgb(${v + warm},${v + warm * 0.4},${v - 10})`; g.fillRect(ox + 2.5, y + 2.5, w - 5, RH - 5);
+          const lg = g.createLinearGradient(0, y, 0, y + RH); lg.addColorStop(0, 'rgba(255,255,255,0.10)'); lg.addColorStop(1, 'rgba(0,0,0,0.16)'); g.fillStyle = lg; g.fillRect(ox + 2.5, y + 2.5, w - 5, RH - 5);
+          h.fillStyle = `rgb(${hv},${hv},${hv})`; h.fillRect(ox + 4, y + 4, w - 8, RH - 8);
+        };
+        draw(x); if (x + w > N) draw(x - N);
+        x += w;
+      }
     }
-    for (let i = 0; i < 900; i++) { g.fillStyle = `rgba(${Math.random() < 0.5 ? '90,80,70' : '255,250,240'},0.07)`; g.fillRect(Math.random() * 256, Math.random() * 256, 3, 2); }
-    const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4; return t;
+    for (let i = 0; i < 5200; i++) { const x = Math.random() * N, y = Math.random() * N, d = Math.random() < 0.55; g.fillStyle = d ? 'rgba(40,36,30,0.10)' : 'rgba(255,250,235,0.08)'; g.fillRect(x, y, 2 + Math.random() * 3, 1 + Math.random() * 2); h.fillStyle = d ? 'rgba(0,0,0,0.12)' : 'rgba(255,255,255,0.10)'; h.fillRect(x, y, 2, 2); }
+    for (let i = 0; i < 26; i++) { const x = Math.random() * N, y = Math.random() * N, lg = g.createLinearGradient(0, y, 0, y + 90); lg.addColorStop(0, 'rgba(50,48,40,0.20)'); lg.addColorStop(1, 'rgba(50,48,40,0)'); g.fillStyle = lg; g.fillRect(x, y, 5 + Math.random() * 14, 90); }   // rain streaks
+    const mk = cv => { const t = new THREE.CanvasTexture(cv); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 8; return t; };
+    const t = mk(c); t.colorSpace = THREE.SRGBColorSpace; return [t, mk(b)];
   })();
-  const STONE = new THREE.MeshStandardMaterial({ map: stoneTex, roughness: 0.95, side: THREE.DoubleSide });
-  const DARK = new THREE.MeshStandardMaterial({ color: 0x8d8576, roughness: 1 }), ROOF = new THREE.MeshStandardMaterial({ color: 0x3f5f9a, roughness: 0.7 });
+  const STONE = new THREE.MeshStandardMaterial({ map: stoneTex, bumpMap: stoneBump, bumpScale: 3, roughness: 1, side: THREE.DoubleSide });
+  const WALLS = STONE.clone(); WALLS.vertexColors = true;      // the big stonework is also shaded by hand: damp and mossy low down
+  const DARK = new THREE.MeshStandardMaterial({ color: 0x8d8576, roughness: 1 }), ROOF = new THREE.MeshStandardMaterial({ color: 0x3e4b5c, roughness: 0.6, metalness: 0.15 });
   const WOOD = new THREE.MeshStandardMaterial({ color: 0x8a5a34, roughness: 0.85 }), GOLD = new THREE.MeshStandardMaterial({ color: 0xf2c84a, roughness: 0.35, metalness: 0.6 });
   const IRON = new THREE.MeshStandardMaterial({ color: 0x3a3d44, roughness: 0.5, metalness: 0.5 });
   {
-    const pos = [], uv = [];
-    const quad = (a, b, c, d, kind) => { for (const p of [a, b, c, a, c, d]) { pos.push(p[0], p[1], p[2]); uv.push((kind === 'x' ? p[2] : p[0]) / 3.2, (kind === 'y' ? p[2] : p[1]) / 3.2); } };
+    const pos = [], uv = [], col = [];
+    const quad = (a, b, c, d, kind) => { for (const p of [a, b, c, a, c, d]) {
+      pos.push(p[0], p[1], p[2]); uv.push((kind === 'x' ? p[2] : p[0]) / 3.2, (kind === 'y' ? p[2] : p[1]) / 3.2);
+      const low = Math.max(0, 1 - p[1] / 2.2), n = 0.5 + 0.5 * Math.sin(p[0] * 0.9 + p[2] * 1.3), moss = kind === 'y' ? 0 : low * low * (0.35 + 0.45 * n), sh = kind === 'y' ? 1.06 : 0.82 + 0.18 * Math.min(1, p[1] / 3);
+      col.push(sh * (1 - moss * 0.34), sh * (1 - moss * 0.16), sh * (1 - moss * 0.42));
+    } };
     for (const s of SOLIDS) {
       if (!s.draw) continue;
       const { x0, x1, z0, z1, y0 } = s, a = s.top(x0, z0), b = s.top(x1, z0), c = s.top(x1, z1), d = s.top(x0, z1);
@@ -73,8 +91,8 @@ export function buildCastle(scene, { spawn, sfx, addBox }) {
       quad([x0, y0, z0], [x1, y0, z0], [x1, b, z0], [x0, a, z0], 'z'); quad([x1, y0, z1], [x0, y0, z1], [x0, d, z1], [x1, c, z1], 'z');
       quad([x0, y0, z1], [x0, y0, z0], [x0, a, z0], [x0, d, z1], 'x'); quad([x1, y0, z0], [x1, y0, z1], [x1, c, z1], [x1, b, z0], 'x');
     }
-    const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); geo.computeVertexNormals();
-    const m = new THREE.Mesh(geo, STONE); m.castShadow = m.receiveShadow = true; m.frustumCulled = false; group.add(m);
+    const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3)); geo.computeVertexNormals();
+    const m = new THREE.Mesh(geo, WALLS); m.castShadow = m.receiveShadow = true; m.frustumCulled = false; group.add(m);
   }
   const add = (geo, mat, x, y, z, shadow = true) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.castShadow = shadow; m.receiveShadow = true; group.add(m); return m; };
   // steps drawn on the stairs
@@ -100,19 +118,63 @@ export function buildCastle(scene, { spawn, sfx, addBox }) {
     const g = new THREE.PlaneGeometry(1.7 * s, 0.9 * s, 6, 1); g.translate(0.85 * s, 0, 0);
     const m = add(g, FLAG, x, y + 2.1 * s, z, false); flags.push(m); return m;
   };
+  const cylUV = (geo, r, h) => { const u = geo.attributes.uv; for (let k = 0; k < u.count; k++) u.setXY(k, u.getX(k) * 6.283 * r / 3.2, u.getY(k) * h / 3.2); return geo; };
+  const HOLE = new THREE.MeshBasicMaterial({ color: 0x15161a });
   for (const [x, z, r, h] of TURRETS) {
-    add(new THREE.CylinderGeometry(r, r * 1.06, h, 24), STONE, x, h / 2, z);
-    add(new THREE.CylinderGeometry(r * 1.12, r, 0.6, 24), DARK, x, h + 0.3, z);
-    add(new THREE.ConeGeometry(r * 1.18, r * 1.6, 24), ROOF, x, h + 0.6 + r * 0.8, z);
-    for (let k = 0; k < 3; k++) { const a = k * 2.1 + 0.6; add(new THREE.BoxGeometry(0.22, 1.1, 0.12), IRON, x + Math.cos(a) * r * 1.01, h * 0.62, z + Math.sin(a) * r * 1.01, false).rotation.y = -a + Math.PI / 2; }
-    flag(x, h + 0.6 + r * 1.6, z);
+    add(cylUV(new THREE.CylinderGeometry(r, r, h, 28, 1, true), r, h), STONE, x, h / 2, z);
+    add(cylUV(new THREE.CylinderGeometry(r, r * 1.22, 2.2, 28, 1, true), r, 2.2), STONE, x, 1.1, z);                      // flared foot
+    for (const y of [h * 0.42, h * 0.74]) add(new THREE.CylinderGeometry(r * 1.035, r * 1.035, 0.22, 28), DARK, x, y, z, false);
+    add(cylUV(new THREE.CylinderGeometry(r * 1.2, r, 0.9, 28, 1, true), r, 0.9), STONE, x, h - 0.1, z);                    // corbelled out
+    add(cylUV(new THREE.CylinderGeometry(r * 1.2, r * 1.2, 1.1, 28, 1, true), r * 1.2, 1.1), STONE, x, h + 0.9, z);        // the gallery
+    for (let k = 0; k < 10; k++) { const a = k * 0.6283; add(new THREE.BoxGeometry(0.7, 0.55, 0.3), STONE, x + Math.cos(a) * r * 1.2, h + 1.7, z + Math.sin(a) * r * 1.2).rotation.y = -a + Math.PI / 2; }
+    add(new THREE.CylinderGeometry(r * 1.1, r * 1.2, 0.2, 28), DARK, x, h + 1.45, z, false);
+    add(new THREE.ConeGeometry(r * 1.28, r * 2.3, 28), ROOF, x, h + 1.5 + r * 1.15, z);
+    add(new THREE.SphereGeometry(0.16, 10, 8), GOLD, x, h + 1.55 + r * 2.3, z, false);
+    for (const [lev, n] of [[0.3, 2], [0.58, 3], [0.86, 3]]) for (let k = 0; k < n; k++) {
+      const a = k * 6.283 / n + lev * 9, w = add(new THREE.BoxGeometry(0.2, 1.15, 0.2), HOLE, x + Math.cos(a) * r * 0.99, h * lev, z + Math.sin(a) * r * 0.99, false); w.rotation.y = -a + Math.PI / 2;
+    }
+    flag(x, h + 1.5 + r * 2.3, z);
+  }
+  // along the outside of the walls: a thick footing, arrow loops, and a row of corbels carrying the parapet
+  {
+    const spots = [], loops = [];
+    for (let k = -S + 0.6; k <= S - 0.5; k += 0.85) spots.push([k, -S - 0.16, 0], [k, S + 0.16, 0], [-S - 0.16, k, 1], [S + 0.16, k, 1]);
+    for (let k = -S + 5; k <= S - 5; k += 5.2) { loops.push([k, -S - 0.03, 0], [-S - 0.03, k, 1], [S + 0.03, k, 1]); if (Math.abs(k) > 9) loops.push([k, S + 0.03, 0]); }
+    const d = new THREE.Object3D(), cm = new THREE.InstancedMesh(new THREE.BoxGeometry(0.42, 0.5, 0.5), STONE, spots.length), lm = new THREE.InstancedMesh(new THREE.BoxGeometry(0.2, 1.5, 0.12), HOLE, loops.length);
+    spots.forEach(([a, b, turn], i) => { d.position.set(a, WH - 0.2, b); d.rotation.y = turn ? Math.PI / 2 : 0; d.updateMatrix(); cm.setMatrixAt(i, d.matrix); });
+    loops.forEach(([a, b, turn], i) => { d.position.set(a, 3.3, b); d.rotation.y = turn ? Math.PI / 2 : 0; d.updateMatrix(); lm.setMatrixAt(i, d.matrix); });
+    cm.castShadow = true; cm.frustumCulled = lm.frustumCulled = false; group.add(cm, lm);
+    for (const [x, z, w, dp] of [[0, -S - 0.2, 2 * S, 0.5], [0, S + 0.2, 2 * S, 0.5], [-S - 0.2, 0, 0.5, 2 * S], [S + 0.2, 0, 0.5, 2 * S]]) {
+      add(new THREE.BoxGeometry(w, 0.24, dp), DARK, x, WH + 0.06, z, false);                                                  // string course
+      if (z > S) { for (const sx of [-1, 1]) add(new THREE.BoxGeometry(S - G - 0.4, 1.0, 0.7), STONE, sx * (G + 0.4 + (S - G - 0.4) / 2), 0.5, z); }   // footing, left open at the gate
+      else add(new THREE.BoxGeometry(w + (dp > 1 ? 0.2 : 0), 1.0, dp + (dp > 1 ? 0 : 0.2)), STONE, x, 0.5, z);
+    }
   }
   // the gate: an arch over the way in, and a portcullis that lifts when somebody comes up to it
-  add(new THREE.TorusGeometry(G, 0.35, 8, 20, Math.PI), DARK, 0, 1.25, S + 0.02, false);
+  for (let k = 0; k <= 12; k++) { const a = k / 12 * Math.PI, v = add(new THREE.BoxGeometry(0.75, 0.62, 0.5), k % 2 ? DARK : STONE, Math.cos(a) * (G + 0.1), 1.3 + Math.sin(a) * (G + 0.1), S + 0.12); v.rotation.z = a + Math.PI / 2; }
+  for (const sx of [-1, 1]) {
+    add(new THREE.BoxGeometry(0.75, 1.3, 0.5), STONE, sx * (G + 0.1), 0.65, S + 0.12);
+    add(new THREE.BoxGeometry(0.16, 4.0, 2.7), WOOD, sx * (G - 0.12), 2.0, S + 1.5);                                          // oak doors, swung back against the passage walls
+    for (const y of [0.8, 2.0, 3.2]) add(new THREE.BoxGeometry(0.2, 0.14, 2.7), IRON, sx * (G - 0.12), y, S + 1.5, false);
+    add(new THREE.CylinderGeometry(0.03, 0.03, 6.6, 6), IRON, sx * 2.2, 2.6, S + 3.4, false).rotation.x = 0.92;               // drawbridge chains
+  }
+  add(new THREE.BoxGeometry(5.2, 0.2, 6.4), WOOD, 0, 0.1, S + 3.4);
+  for (let k = 0; k < 9; k++) add(new THREE.BoxGeometry(5.3, 0.06, 0.08), IRON, 0, 0.21, S + 0.6 + k * 0.7, false);
+  { const sh = add(new THREE.CylinderGeometry(0.75, 0.75, 0.14, 5), FLAG, 0, 5.15, S + 0.1, false); sh.rotation.x = Math.PI / 2; sh.rotation.y = Math.PI; sh.scale.z = 1.25; add(new THREE.SphereGeometry(0.2, 10, 8), GOLD, 0, 5.15, S + 0.2, false); }
   const gate = new THREE.Group(); gate.position.set(0, 0, S - 1.5); group.add(gate);
   for (let k = -2; k <= 2; k++) { const m = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 4.2, 6), IRON); m.position.set(k * 1.15, 2.1, 0); gate.add(m); }
   for (let k = 0; k < 4; k++) { const m = new THREE.Mesh(new THREE.BoxGeometry(2 * G - 0.2, 0.12, 0.1), IRON); m.position.set(0, 0.5 + k * 1.1, 0); gate.add(m); }
   for (const sx of [-1, 1]) { const b = add(new THREE.PlaneGeometry(1.3, 3.4), FLAG, sx * 9.5, 3.9, S + 0.06, false); flags.push(b); b.userData.hang = true; }
+  for (const [x, z] of [[-4.5, -15.5], [4.5, -15.5], [-4.5, -6.5], [4.5, -6.5]]) add(new THREE.BoxGeometry(0.9, 6.3, 0.9), STONE, x, 8.1, z);       // corner buttresses
+  for (const y of [8.2, 10.9]) add(new THREE.BoxGeometry(9.3, 0.2, 9.3), DARK, 0, y, -11, false);
+  for (const [x, z, turn] of [[0, -6.44, 0], [-4.56, -11, 1], [4.56, -11, 1], [0, -15.56, 0]]) for (const dx of [-2.1, 2.1]) {
+    const px = x + (turn ? 0 : dx), pz = z + (turn ? dx : 0), ry = turn ? Math.PI / 2 : 0;
+    add(new THREE.BoxGeometry(0.75, 1.5, 0.14), HOLE, px, 9.3, pz, false).rotation.y = ry;
+    const top = add(new THREE.CylinderGeometry(0.375, 0.375, 0.14, 14), HOLE, px, 10.05, pz, false); top.rotation.set(Math.PI / 2, 0, ry); top.rotation.order = 'YXZ'; top.rotation.set(Math.PI / 2, ry, 0);
+    add(new THREE.BoxGeometry(1.0, 0.14, 0.3), DARK, px, 8.5, pz, false).rotation.y = ry;
+  }
+  add(new THREE.BoxGeometry(1.7, 2.5, 0.16), WOOD, 0, 6.25, -6.42); for (const y of [5.6, 6.9]) add(new THREE.BoxGeometry(1.75, 0.12, 0.2), IRON, 0, y, -6.42, false);
+  add(new THREE.BoxGeometry(2.1, 0.3, 0.3), DARK, 0, 7.65, -6.4, false);
   // the keep's top: a little bell house, and the tallest flag
   for (const [x, z] of [[-1.6, -12.6], [1.6, -12.6], [-1.6, -9.4], [1.6, -9.4]]) add(new THREE.CylinderGeometry(0.14, 0.16, 3, 10), STONE, x, 12.5, z);
   add(new THREE.ConeGeometry(3, 2.6, 4), ROOF, 0, 15.3, -11).rotation.y = Math.PI / 4;
@@ -131,9 +193,28 @@ export function buildCastle(scene, { spawn, sfx, addBox }) {
     const roof = new THREE.Mesh(new THREE.BoxGeometry(3.5, 0.08, 2.0), new THREE.MeshStandardMaterial({ color: col, roughness: 0.9 })); roof.position.y = 2.65; roof.rotation.x = 0.16; roof.castShadow = true; st.add(roof);
     for (let k = 0; k < 4; k++) { const f = new THREE.Mesh(new THREE.SphereGeometry(0.16, 10, 8), new THREE.MeshStandardMaterial({ color: pick([0xe2503c, 0xf2c230, 0x8ac24a, 0xf08a3c]) })); f.position.set(-1 + k * 0.65, 1.1, rnd(-0.3, 0.3)); st.add(f); }
   }
+  {
+    const c = document.createElement('canvas'); c.width = c.height = 256; const g = c.getContext('2d'); g.fillStyle = '#5d584f'; g.fillRect(0, 0, 256, 256);
+    for (let i = 0; i < 156; i++) { const x = (i % 12) * 21.4 + ((Math.floor(i / 12) % 2) * 10.7), y = Math.floor(i / 12) * 19.7, v = 128 + Math.random() * 50; g.fillStyle = `rgb(${v + 8},${v + 2},${v - 10})`; g.beginPath(); g.ellipse(x + 10 + Math.random() * 2, y + 10 + Math.random() * 2, 8.6 + Math.random() * 1.4, 8 + Math.random() * 1.5, Math.random() * 3, 0, 6.283); g.fill(); }
+    const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(22, 22); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8;
+    const yard = new THREE.Mesh(new THREE.PlaneGeometry(2 * S + 0.4, 2 * S + 0.4), new THREE.MeshStandardMaterial({ map: t, bumpMap: t, bumpScale: 2, roughness: 1 })); yard.rotation.x = -Math.PI / 2; yard.position.y = 0.04; yard.receiveShadow = true; group.add(yard);
+    const HAY = new THREE.MeshStandardMaterial({ color: 0xd8b84e, roughness: 1 });
+    for (const [x, z] of [[20.5, 20], [21.6, 20.6], [20.9, 21.5], [-21, -20], [-20, -21.2], [12.2, 15.6], [17, 3.4]]) { add(new THREE.CylinderGeometry(0.42, 0.36, 1.0, 14), WOOD, x, 0.5, z); for (const y of [0.25, 0.75]) add(new THREE.CylinderGeometry(0.43, 0.43, 0.07, 14), IRON, x, y, z, false); }
+    // a lean-to against the east wall, with hay in it
+    for (const z of [-3, 1.5, 6]) add(new THREE.CylinderGeometry(0.1, 0.1, 2.9, 8), WOOD, 19.2, 1.45, z);
+    add(new THREE.BoxGeometry(4.3, 0.12, 10.2), WOOD, 21, 3.25, 1.5).rotation.z = 0.2;
+    for (const [x, z, r] of [[21.6, -1.5, 0.2], [21.4, 0.4, -0.3], [21.7, 3.6, 0.5], [21.5, 2.0, 0]]) add(new THREE.BoxGeometry(1.5, 0.8, 0.9), HAY, x, 0.4, z).rotation.y = r;
+    add(new THREE.BoxGeometry(1.4, 0.8, 0.9), HAY, 21.5, 1.2, 1.2).rotation.y = 0.2;
+  }
+  // torches on the walls: a bracket, a cup, and a flame that never quite holds still
+  const FIRE = new THREE.MeshBasicMaterial({ color: 0xffa23a, toneMapped: false }), CORE = new THREE.MeshBasicMaterial({ color: 0xfff0b0, toneMapped: false }), torches = [];
+  for (const [x, y, z] of [[-4.6, 3.3, S + 0.75], [4.6, 3.3, S + 0.75], [11.0, 2.2, -3.6], [-8.6, 2.2, -3.6], [-22.6, 2.6, 16], [22.6, 2.6, -16], [-22.6, 2.6, -16], [0, 6.9, -6.2], [-12, 2.6, -22.6], [12, 2.6, -22.6]]) {
+    add(new THREE.CylinderGeometry(0.035, 0.05, 0.7, 6), IRON, x, y, z, false); add(new THREE.CylinderGeometry(0.12, 0.07, 0.16, 8), IRON, x, y + 0.4, z, false);
+    torches.push([add(new THREE.ConeGeometry(0.13, 0.5, 8), FIRE, x, y + 0.72, z, false), add(new THREE.ConeGeometry(0.06, 0.28, 6), CORE, x, y + 0.62, z, false), x * 1.7 + z]);
+  }
   // lamps by the gate and at the foot of the keep stairs, always lit
   const GLOW = new THREE.MeshBasicMaterial({ color: 0xffc66a, toneMapped: false });
-  for (const [x, y, z] of [[-4.2, 3.4, S + 0.5], [4.2, 3.4, S + 0.5], [11.2, 1.9, -3.4], [-9, 1.9, -3.4], [0, 3.6, -3.7]]) { add(new THREE.CylinderGeometry(0.05, 0.05, 0.5, 6), IRON, x, y + 0.42, z, false); add(new THREE.SphereGeometry(0.22, 12, 10), GLOW, x, y, z, false); }
+  void GLOW;
 
   // fireballs meet the stonework too
   for (const s of SOLIDS) { const top = Math.max(s.top(s.x0, s.z0), s.top(s.x1, s.z1)), h = (top - s.y0) / 2; addBox(CASTLE.x + (s.x0 + s.x1) / 2, Y0 + s.y0 + h, CASTLE.z + (s.z0 + s.z1) / 2, (s.x1 - s.x0) / 2, h, (s.z1 - s.z0) / 2); }
@@ -211,6 +292,7 @@ export function buildCastle(scene, { spawn, sfx, addBox }) {
   const here = new THREE.Vector3();
   function update(dt, time, px, pz, feet) {
     const dist = Math.hypot(px - CASTLE.x, pz - CASTLE.z), lx = px - CASTLE.x, lz = pz - CASTLE.z;
+    for (const [f, c, ph] of torches) { const k = 0.85 + 0.25 * Math.sin(time * 11 + ph) * Math.sin(time * 7.3 + ph * 2); f.scale.set(1, k, 1); c.scale.set(1, 2 - k, 1); f.rotation.z = Math.sin(time * 5 + ph) * 0.12; }
     // the portcullis
     const want = Math.hypot(lx, lz - S) < 15 ? 4.1 : 0; gate.position.y += (want - gate.position.y) * Math.min(1, dt * 1.6);
     // flags fly, banners sway

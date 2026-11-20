@@ -289,7 +289,7 @@ function updateKid(dt, dtReal) {
   } else if (kid.t <= 0) {                                         // off again
     if (Math.random() < 0.3) {                                      // to the swing or the hammock
       const far = Math.hypot(kid.x - play.field.x, kid.z - play.field.z) < 22 ? Math.random() < 0.8 : Math.random() < 0.4;   // once out at the playground she stays a while
-      const kind = far ? ['round', 'seesaw', 'slide'][Math.floor(Math.random() * 3)] : Math.random() < 0.6 ? 'swing' : 'hammock', e = play[kind], a = e.g.rotation.y + (kind === 'swing' ? Math.PI : Math.PI / 2);
+      const kind = far ? ['round', 'seesaw', 'slide', 'bars', 'sand'][Math.floor(Math.random() * 5)] : Math.random() < 0.6 ? 'swing' : 'hammock', e = play[kind], a = e.g.rotation.y + (kind === 'swing' ? Math.PI : Math.PI / 2);
       if (far) kidGo(e.x, e.z, true); else kidGo(e.x + Math.sin(a) * 1.9, e.z + Math.cos(a) * 1.9, true);
       kid.goal = kind; kid.t = Math.hypot(kid.tx - kid.x, kid.tz - kid.z) / 5 + 4;
     }
@@ -603,10 +603,6 @@ function fireflies(x, y, z, n, flash = true) {
     { color: 0xffc66a, g: 1.2, wob: 3 + Math.random() * 4 });
 }
 const castle = buildCastle(scene, { spawn, sfx, addBox: (x, y, z, hx, hy, hz) => addStatic(new CANNON.Box(new CANNON.Vec3(hx, Math.max(0.05, hy), hz)), x, y, z) });
-{                                                            // a paved yard inside the walls
-  const yard = new THREE.Mesh(new THREE.PlaneGeometry(52.4, 52.4), new THREE.MeshStandardMaterial({ color: 0xb9ae98, roughness: 1 }));
-  yard.rotation.x = -Math.PI / 2; yard.position.set(CASTLE.x, CASTLE.y + 0.04, CASTLE.z); yard.receiveShadow = true; scene.add(yard);
-}
 function updateParts(dt, t) {
   for (const p of parts) {
     if (p.life <= 0) continue;
@@ -800,6 +796,9 @@ const play = { swing: null, hammock: null, spots: [] };
     for (const sz of [-1, 1]) for (let k = 1; k <= 4; k++) g.add(bar(V(-0.75, k * 0.45, sz * 1.7), V(0.75, k * 0.45, sz * 1.7), 0.028, RED));
     g.updateMatrixWorld(true);
     for (const sx of [-1, 1]) for (const sz of [-1, 1]) { const p = world(g, sx * 0.75, sz * 1.7); play.spots.push({ x: p.x, z: p.z, r: 0.45 }); }
+    const foot = world(g, 0, -2.3);
+    play.bars = { x: foot.x, z: foot.z, g, r: 0.8, seat: g, rider: false, pose: KID_POSE.stand, dur: 6.2, auto: true, tt: 0, exit: world(g, 0, 2.7), H,
+      put(k) { k.position.set(0, 0.14, -1.5); k.rotation.set(0, 0, 0); this.tt = 0; } };
   }
   // a sandpit, with a bucket left in it
   {
@@ -808,15 +807,30 @@ const play = { swing: null, hammock: null, spots: [] };
     for (let k = 0; k < 6; k++) { const a = k * Math.PI / 3, b = a + Math.PI / 3; g.add(bar(V(Math.cos(a) * 1.95, 0.14, Math.sin(a) * 1.95), V(Math.cos(b) * 1.95, 0.14, Math.sin(b) * 1.95), 0.11, MAT.wood)); }
     const bucket = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.13, 0.26, 14), RED); bucket.position.set(0.5, 0.25, -0.3); bucket.castShadow = true; g.add(bucket);
     const heap = new THREE.Mesh(sphereGeo, SAND); heap.scale.set(0.42, 0.22, 0.42); heap.position.set(-0.5, 0.12, 0.4); g.add(heap);
+    const fort = new THREE.Group(); fort.position.set(0.1, 0.12, 0.95); g.add(fort);                 // what she builds: a keep and four little towers
+    const mound = (r, h, x, z) => { const m = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.72, r, h, 12), SAND); m.position.set(x, h / 2, z); m.castShadow = true; fort.add(m); };
+    mound(0.3, 0.38, 0, 0); for (const [x, z] of [[-0.36, -0.3], [0.36, -0.3], [-0.36, 0.3], [0.36, 0.3]]) mound(0.13, 0.3, x, z);
+    fort.scale.setScalar(0.01);
+    g.updateMatrixWorld(true);
+    play.sand = { x: g.position.x, z: g.position.z, g, r: 1.5, seat: g, rider: false, pose: KID_POSE.hold, sit: 'slide', fort, built: 0, exit: world(g, 0, -2.9), exitTurn: Math.PI,
+      put(k) { k.position.set(0.1, 0.13 - 0.84, -0.25); k.rotation.set(0, 0, 0); } };
   }
   play.field = at(0, 0);
 }
-const RIDES = ['swing', 'hammock', 'round', 'seesaw', 'slide'];
+const RIDES = ['swing', 'hammock', 'round', 'seesaw', 'slide', 'bars', 'sand'];
 function updatePlay(dt) {
   {
     const rd = play.round, ss = play.seesaw, sl = play.slide;
     rd.speed += (rd.want - rd.speed) * Math.min(1, dt * 0.8); rd.seat.rotation.y -= rd.speed * dt;
     ss.amp += (ss.want - ss.amp) * Math.min(1, dt * 0.9); ss.seat.rotation.z = Math.sin(time * 1.7) * ss.amp;
+    const mb = play.bars, sd = play.sand;
+    if (mb.rider) {                                          // along the rungs and back to the middle of the far end, body swinging under her hands
+      mb.tt += dt; const p = Math.min(1, mb.tt / 5.4), reach = Math.sin(mb.tt * 5.2);
+      kid.group.position.set(0, 0.14 + Math.abs(reach) * 0.05, -1.5 + 3.0 * p); kid.group.rotation.x = reach * 0.2; kid.group.rotation.z = Math.cos(mb.tt * 2.6) * 0.07;
+    }
+    if (sd.rider) { sd.built = Math.min(1, sd.built + dt / 7); kid.group.rotation.x = 0.12 + Math.sin(time * 4.2) * 0.06; if (Math.random() < dt * 2.5) dust(sd.x + rnd(0.5), 0.3, sd.z + rnd(0.5), 1); }
+    else sd.built = Math.max(0, sd.built - dt / 14);         // left alone, it slowly crumbles
+    sd.fort.scale.setScalar(Math.max(0.01, sd.built));
     if (sl.rider) { sl.tt += dt; const p = Math.min(1, Math.max(0, (sl.tt - 0.9) / 1.5)); kid.group.position.lerpVectors(sl.top, sl.low, p * p * (3 - 2 * p)).y -= 0.9; }
   }
   const sw = play.swing, hm = play.hammock;
