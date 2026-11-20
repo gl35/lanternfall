@@ -1168,7 +1168,8 @@ function step(dtReal) {
       wings.children[0].rotation.set(0, -beat, fold); wings.children[1].rotation.set(0, beat, -fold);
     } else wingW = 0;
     if (flyW > 0.01 && HERO.fly) for (const n in flyBones) {
-      const b = flyBones[n], [x, y, z] = POSE[n] || FLY_ZERO;
+      const b = flyBones[n]; let [x, y, z] = POSE[n] || FLY_ZERO;
+      if (player.perch && (n === 'LeftLeg' || n === 'RightLeg')) x += Math.sin(time * 3.1 + (n === 'LeftLeg' ? 0 : Math.PI)) * 26 - 6;   // her shins swing, one forward as the other comes back
       b.bone.quaternion.slerp(kidQ.copy(b.bind).multiply(kidQ2.setFromEuler(kidE.set(x * D2R, y * D2R, z * D2R))), flyW);
     }
   }
