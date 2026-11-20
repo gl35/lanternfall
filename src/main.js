@@ -167,7 +167,23 @@ const KID_POSE = {
   lie: { LeftArm: [-72, 0, 0], RightArm: [-72, 0, 0] },                                                                            // arms by the sides
 };
 const flyBones = {}, FLY_POSE = { LeftArm: [20, 0, 0], RightArm: [20, 0, 0], LeftForeArm: [0, 0, 0], RightForeArm: [0, 0, 0], LeftHand: [0, 0, 0], RightHand: [0, 0, 0] };   // arms straight out to the sides, like wings
-let flyW = 0;
+let flyW = 0, wingW = 0;
+// White wings that open from her back while she flies: a fan of long feathers with a row of short ones over them.
+const wings = new THREE.Group(), wingP = new THREE.Vector3();
+{
+  const featherGeo = new THREE.SphereGeometry(1, 14, 8), mat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.75, emissive: 0x8a8f99, emissiveIntensity: 0.55 });
+  for (const side of [1, -1]) {
+    const w = new THREE.Group();
+    const feather = (deg, len, wide, z) => {
+      const a = deg * Math.PI / 180, f = new THREE.Mesh(featherGeo, mat);
+      f.scale.set(len / 2, wide, 0.014); f.position.set(Math.cos(a) * len / 2, Math.sin(a) * len / 2, z); f.rotation.z = a; f.castShadow = true; w.add(f);
+    };
+    for (let i = 0; i < 10; i++) { const t = i / 9, deg = 28 - t * 112; feather(deg, 0.5 + 0.75 * Math.sin(Math.min(1, t * 1.25 + 0.12) * Math.PI) ** 0.7, 0.085, i * 0.004); }
+    for (let i = 0; i < 7; i++) { const t = i / 6, deg = 22 - t * 95; feather(deg, 0.3 + 0.32 * Math.sin((t * 0.9 + 0.1) * Math.PI), 0.07, -0.025 - i * 0.003); }
+    w.scale.x = side; w.position.x = side * 0.07; wings.add(w);
+  }
+  wings.visible = false; heroTilt.add(wings);
+}
 const kidE = new THREE.Euler(), kidQ = new THREE.Quaternion(), kidQ2 = new THREE.Quaternion(), D2R = Math.PI / 180;
 function kidPose() {
   for (const n in kid.pose) { const b = kid.bones[n]; if (!b) continue; const [x, y, z] = kid.pose[n]; b.bone.quaternion.copy(b.bind).multiply(kidQ.setFromEuler(kidE.set(x * D2R, y * D2R, z * D2R))); }
@@ -1089,6 +1105,14 @@ function step(dtReal) {
     if (mode === 'walk') heroAct.timeScale = 0.6 + player.moving * 1.5;
     mixer.update(dtReal);
     flyW += ((heroMode === 'fly' ? 1 : 0) - flyW) * Math.min(1, dtReal * 8);
+    wings.visible = HERO.fly && player.flying && !!flyBones.Spine2;
+    if (wings.visible) {                                           // they sit between her shoulder blades and beat
+      wingW += (1 - wingW) * Math.min(1, dtReal * 7);
+      heroTilt.worldToLocal(flyBones.Spine2.bone.getWorldPosition(wingP)); wings.position.set(wingP.x, wingP.y + 0.05, wingP.z + 0.16);
+      wings.scale.setScalar(Math.max(0.01, wingW));
+      const beat = 0.12 + Math.sin(time * 7.5) * 0.38;
+      wings.children[0].rotation.y = beat; wings.children[1].rotation.y = -beat;
+    } else wingW = 0;
     if (flyW > 0.01 && HERO.fly) for (const n in FLY_POSE) {
       const b = flyBones[n]; if (!b) continue; const [x, y, z] = FLY_POSE[n];
       b.bone.quaternion.slerp(kidQ.copy(b.bind).multiply(kidQ2.setFromEuler(kidE.set(x * D2R, y * D2R, z * D2R))), flyW);
@@ -1127,7 +1151,7 @@ function frame(now) {
 // Scripted stepping for tests (the preview pane only runs frames while visible).
 window.game = {
   step(seconds = 1, dt = 1 / 60) { window.__manual = true; for (let t = 0; t < seconds; t += dt) step(dt); renderer.render(scene, camera); return this.state(); },
-  fling, jump, setHero, swapHero, beacons, motes, lightBeacon, debug: { FLY_POSE, WOODS, npc, kid, stand, stand2, play, KID_POSE, kidMount, kidDismount, scene, camera, hero, acts, THROW, THREE, player, sites, renderer, get mixer() { return mixer; } },
+  fling, jump, setHero, swapHero, beacons, motes, lightBeacon, debug: { FLY_POSE, wings, WOODS, npc, kid, stand, stand2, play, KID_POSE, kidMount, kidDismount, scene, camera, hero, acts, THROW, THREE, player, sites, renderer, get mixer() { return mixer; } },
   walk(x, y) { window.__joy = x || y ? { x, y } : null; },
   setLevel(n) { level = n; buildLevel(); },
   setSeason(name) { scenery.setSeason(name); },
