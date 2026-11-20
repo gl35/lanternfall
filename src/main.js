@@ -88,7 +88,7 @@ function setHero(i) {
     for (const k in acts) delete acts[k];
     Object.assign(CLIP, { idle: null, walk: null, jump: null, win: null });
     Object.assign(THROW, { clip: 'box_02', wind: 2.0, speed: 1.3, hold: 0.8 });
-    heroAct = null; heroMode = '';
+    heroAct = null; heroMode = ''; wings.visible = false;
     mixer = new THREE.AnimationMixer(g.scene);
     for (const c of g.animations) acts[c.name] = mixer.clipAction(c);
     pickClips(); heroModel = g.scene; heroTilt.add(heroModel); heroLoaded = true;
@@ -1122,13 +1122,13 @@ function step(dtReal) {
     if (mode === 'walk') heroAct.timeScale = 0.6 + player.moving * 1.5;
     mixer.update(dtReal);
     flyW += ((heroMode === 'fly' ? 1 : 0) - flyW) * Math.min(1, dtReal * 8);
-    wings.visible = HERO.fly && player.flying && !!flyBones.Spine2;
+    wings.visible = heroIx === KID && player.flying && player.y > 0 && !!flyBones.Spine2;   // hers alone, and only in the air
     if (wings.visible) {                                           // they sit between her shoulder blades and beat
       wingW += (1 - wingW) * Math.min(1, dtReal * 7);
-      heroTilt.worldToLocal(flyBones.Spine2.bone.getWorldPosition(wingP)); wings.position.set(wingP.x, wingP.y + 0.05, wingP.z + 0.16);
+      heroTilt.worldToLocal(flyBones.Spine2.bone.getWorldPosition(wingP)); wings.position.set(wingP.x, wingP.y + 0.05, wingP.z + 0.24);
       wings.scale.setScalar(Math.max(0.01, wingW) * 0.85);
-      const beat = 0.16 + Math.sin(time * 5.2) * 0.3, fold = Math.sin(time * 5.2 - 0.9) * 0.08;            // a slow, wide beat; the tips lag a little
-      wings.children[0].rotation.set(0, beat, 0.1 + fold); wings.children[1].rotation.set(0, -beat, -0.1 - fold);
+      const beat = 0.14 + (0.5 + 0.5 * Math.sin(time * 5.2)) * 0.5, fold = Math.sin(time * 5.2 - 0.9) * 0.08;   // they sweep back from her shoulders and never forward, so they stay clear of her arms
+      wings.children[0].rotation.set(0, -beat, 0.1 + fold); wings.children[1].rotation.set(0, beat, -0.1 - fold);
     } else wingW = 0;
     if (flyW > 0.01 && HERO.fly) for (const n in flyBones) {
       const b = flyBones[n], [x, y, z] = FLY_POSE[n] || FLY_ZERO;
