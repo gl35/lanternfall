@@ -597,8 +597,9 @@ function swayWithGrass(mat, U) {
     s.vertexShader = 'uniform float uTime, uWind;\n' + GUST_GLSL + '\n' + s.vertexShader.replace('#include <project_vertex>', `
       vec4 mvPosition = instanceMatrix * vec4(transformed, 1.0);
       vec3 fo = instanceMatrix[3].xyz;
-      float fb = gustAt(fo.xz, uTime) * (0.15 + 0.85 * uWind), lean = fb * fo.y * fo.y;
       vec3 off = mvPosition.xyz - fo;
+      float hh = max(0.0, fo.y + min(off.y, 0.0));                      // how high this point stands: a stem bends from its foot
+      float fb = gustAt(fo.xz, uTime) * (0.15 + 0.85 * uWind), lean = fb * hh * hh;
       mvPosition.xz += vec2(0.86, 0.5) * lean;
       mvPosition.y -= lean * lean * 0.25 + dot(off.xz, vec2(0.86, 0.5)) * fb * 0.9;      // the head tips over as it leans
       mvPosition = modelViewMatrix * mvPosition;
@@ -606,28 +607,60 @@ function swayWithGrass(mat, U) {
   };
   return mat;
 }
-function flowers(r, U) {
-  const g = new THREE.Group(), N = 2600;
-  // five-petal star: a flat disc with every other rim vertex pulled in
-  const petal = new THREE.CircleGeometry(0.13, 10), pp = petal.attributes.position;
-  for (let i = 1; i < pp.count; i++) if (i % 2 === 0) pp.setXYZ(i, pp.getX(i) * 0.42, pp.getY(i) * 0.42, 0);
-  petal.rotateX(-Math.PI / 2);
-  const heart = new THREE.SphereGeometry(0.026, 8, 6);
-  const pm = new THREE.InstancedMesh(petal, swayWithGrass(new THREE.MeshLambertMaterial({ color: 0xffffff, side: THREE.DoubleSide }), U), N);
-  const hm = new THREE.InstancedMesh(heart, swayWithGrass(new THREE.MeshLambertMaterial({ color: 0xffd23e }), U), N);
-  const d = new THREE.Object3D(), c = new THREE.Color(), hues = [0xff7fb0, 0xc58cff, 0xffe45a, 0xffffff, 0xff9a5a, 0x8fb8ff];
-  let cx = 0, cz = 0, hue = 0;
-  for (let i = 0; i < N; i++) {
-    if (i % 26 === 0) { const a = r() * 6.283, rad = Math.sqrt(r()) * (R - 3); cx = Math.cos(a) * rad; cz = Math.sin(a) * rad; hue = Math.floor(r() * hues.length); }
-    const a = r() * 6.283, rad = Math.sqrt(r()) * 3.6, s = 1.1 + r() * 0.8;
-    d.position.set(cx + Math.cos(a) * rad, 0.8 + r() * 0.3, cz + Math.sin(a) * rad);
-    d.rotation.set((r() - 0.5) * 0.7, r() * 6, (r() - 0.5) * 0.7); d.scale.setScalar(s); d.updateMatrix();
-    pm.setMatrixAt(i, d.matrix);
-    c.set(r() < 0.75 ? hues[hue] : hues[Math.floor(r() * hues.length)]); pm.setColorAt(i, c);
-    d.position.y += 0.02 * s; d.updateMatrix(); hm.setMatrixAt(i, d.matrix);
+// Meadow flowers, each a real flower on its own stem: daisies with two rings of narrow petals round a domed golden
+// eye, and cupped five-petalled blooms (poppy, buttercup, cornflower by colour) with a dark heart ringed by stamens.
+// Petals are shaded along their length and curl at the edges, so a head reads as petals and not as a flat shape.
+function flowerHead(rings) {
+  const pos = [], col = [], idx = [];
+  for (const R of rings) for (let p = 0; p < R.n; p++) {
+    const a = p / R.n * 6.283 + R.rot, ca = Math.cos(a), sa = Math.sin(a), S = 4, base = pos.length / 3, jit = 0.88 + 0.24 * ((p * 7) % 5) / 5;
+    for (let k = 0; k <= S; k++) {
+      const t = k / S, x = R.r0 + R.len * jit * t, hw = R.wid / 2 * Math.pow(Math.sin(Math.min(1, t * 0.9 + 0.1) * Math.PI), 0.6) * (1 - 0.12 * t), y = R.lift * Math.sin(t * 1.9) - R.droop * t * t;
+      for (const sd of [-1, 1]) {
+        const z = sd * hw; pos.push(x * ca - z * sa, y + R.cup * hw * 1.2, x * sa + z * ca);
+        const c = R.shade0 + (R.shade1 - R.shade0) * Math.pow(t, 0.7) - (sd > 0 ? 0.04 : 0); col.push(c, c, c);
+      }
+      if (k < S) { const q = base + k * 2; idx.push(q, q + 1, q + 2, q + 1, q + 3, q + 2); }
+    }
   }
-  pm.frustumCulled = hm.frustumCulled = false;
-  g.add(pm, hm);
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3)); g.setIndex(idx); g.computeVertexNormals();
+  return g;
+}
+function tinted(geo, fn) {                                   // give a plain shape vertex colours from a function of its position
+  const p = geo.attributes.position, col = []; for (let k = 0; k < p.count; k++) col.push(...fn(p.getX(k), p.getY(k), p.getZ(k)));
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3)); return geo;
+}
+function flowers(r, U) {
+  const g = new THREE.Group(), N = 2600, mat = () => swayWithGrass(new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true, side: THREE.DoubleSide }), U);
+  const daisy = flowerHead([{ n: 15, len: 0.105, wid: 0.036, r0: 0.02, lift: 0.012, droop: 0.032, rot: 0, shade0: 0.8, shade1: 1, cup: 0.25 },
+    { n: 10, len: 0.078, wid: 0.03, r0: 0.016, lift: 0.03, droop: 0.01, rot: 0.3, shade0: 0.86, shade1: 1, cup: 0.3 }]);
+  const cup = flowerHead([{ n: 5, len: 0.1, wid: 0.118, r0: 0.008, lift: 0.07, droop: -0.012, rot: 0, shade0: 0.48, shade1: 1, cup: 0.5 },
+    { n: 4, len: 0.074, wid: 0.09, r0: 0.006, lift: 0.086, droop: -0.02, rot: 0.6, shade0: 0.55, shade1: 0.96, cup: 0.6 }]);
+  const eye = tinted(new THREE.SphereGeometry(0.031, 10, 6).scale(1, 0.6, 1).translate(0, 0.014, 0), (x, y) => { const k = 0.75 + y * 9 + 0.12 * Math.sin(x * 400); return [1.0 * k, 0.78 * k, 0.16 * k]; });
+  const heartParts = [tinted(new THREE.SphereGeometry(0.017, 8, 6).translate(0, 0.02, 0), () => [0.16, 0.1, 0.14])];
+  for (let k = 0; k < 9; k++) { const a = k * 0.698; heartParts.push(tinted(new THREE.SphereGeometry(0.0065, 5, 4).translate(Math.cos(a) * 0.03, 0.036, Math.sin(a) * 0.03), () => [1.0, 0.86, 0.3])); }
+  const heart = mergeGeometries(heartParts);
+  const stem = (() => { const c = new THREE.CylinderGeometry(0.006, 0.011, 1.06, 5, 5); c.translate(0, -0.53, 0); const p = c.attributes.position; for (let k = 0; k < p.count; k++) { const t = -p.getY(k) / 1.06; p.setX(k, p.getX(k) + Math.sin(t * Math.PI) * 0.035); } c.computeVertexNormals(); return tinted(c, (x, y) => { const k = 0.7 + 0.3 * (1 + y); return [0.3 * k, 0.56 * k, 0.2 * k]; }); })();
+  const ND = Math.round(N * 0.56), NC = N - ND;
+  const kinds = [{ n: ND, petals: new THREE.InstancedMesh(daisy, mat(), ND), mid: new THREE.InstancedMesh(eye, mat(), ND), hues: [0xffffff, 0xfff6ee, 0xffd9e8, 0xe7d6ff], size: [0.95, 0.5], k: 0 },
+    { n: NC, petals: new THREE.InstancedMesh(cup, mat(), NC), mid: new THREE.InstancedMesh(heart, mat(), NC), hues: [0xf0503c, 0xffd23a, 0xff8a3a, 0x6f8fe6, 0xf2a0c4], size: [0.85, 0.45], k: 0 }];
+  const stems = new THREE.InstancedMesh(stem, mat(), N);
+  const d = new THREE.Object3D(), c = new THREE.Color();
+  let cx = 0, cz = 0, hue = 0, kind = kinds[0];
+  for (let i = 0; i < N; i++) {
+    if (i % 26 === 0) {                                      // they grow in drifts of one kind and mostly one colour
+      const a = r() * 6.283, rad = Math.sqrt(r()) * (R - 3); cx = Math.cos(a) * rad; cz = Math.sin(a) * rad;
+      kind = kinds[0].k >= kinds[0].n ? kinds[1] : kinds[1].k >= kinds[1].n ? kinds[0] : r() < 0.56 ? kinds[0] : kinds[1]; hue = Math.floor(r() * kind.hues.length);
+    }
+    if (kind.k >= kind.n) kind = kinds[0].k < kinds[0].n ? kinds[0] : kinds[1];
+    const a = r() * 6.283, rad = Math.sqrt(r()) * 3.6, sc = kind.size[0] + r() * kind.size[1];
+    d.position.set(cx + Math.cos(a) * rad, 0.78 + r() * 0.32, cz + Math.sin(a) * rad);
+    d.rotation.set((r() - 0.5) * 0.6, r() * 6, (r() - 0.5) * 0.6); d.scale.setScalar(sc); d.updateMatrix();
+    kind.petals.setMatrixAt(kind.k, d.matrix); kind.mid.setMatrixAt(kind.k, d.matrix); stems.setMatrixAt(i, d.matrix);
+    c.set(r() < 0.78 ? kind.hues[hue % kind.hues.length] : kind.hues[Math.floor(r() * kind.hues.length)]); c.offsetHSL((r() - 0.5) * 0.03, 0, (r() - 0.5) * 0.06); kind.petals.setColorAt(kind.k, c);
+    kind.k++;
+  }
+  for (const m of [kinds[0].petals, kinds[0].mid, kinds[1].petals, kinds[1].mid, stems]) { m.frustumCulled = false; g.add(m); }
   return g;
 }
 
