@@ -169,7 +169,7 @@ const KID_POSE = {
   hold: { LeftArm: [-30, 0, 0], RightArm: [-30, 0, 0] },                                                                           // hands a little out in front, on a rail or a handle                                                                            // arms by the sides
 };
 const flyBones = {}, FLY_POSE = { LeftArm: [20, 0, 0], RightArm: [20, 0, 0], LeftForeArm: [0, 0, 0], RightForeArm: [0, 0, 0], LeftHand: [0, 0, 0], RightHand: [0, 0, 0] };   // arms straight out to the sides, like wings
-let flyW = 0, wingW = 0;
+let flyW = 0, wingW = 0, swimT = 0;
 const SIT_POSE = { LeftArm: [-58, 0, 0], RightArm: [-58, 0, 0] };
 // Turn a bone so the stretch from it to its child points along a given direction (in the world), keeping its twist.
 const aimA = new THREE.Vector3(), aimB = new THREE.Vector3(), aimQ = new THREE.Quaternion(), aimW = new THREE.Quaternion(), aimP = new THREE.Quaternion();
@@ -180,6 +180,24 @@ function aimBone(bone, child, dir, w) {
   bone.quaternion.slerp(aimW, w);
 }
 const sitD = new THREE.Vector3(), sitQ = new THREE.Quaternion();
+function swimLimbs(w, stroke) {
+  hero.getWorldQuaternion(sitQ);                             // along the way she is heading: -z ahead, +y up
+  for (const [side, sx, ph] of [['Left', 1, 0], ['Right', -1, Math.PI]]) {
+    const arm = flyBones[side + 'Arm'], fore = flyBones[side + 'ForeArm'], hand = flyBones[side + 'Hand'];
+    const up = flyBones[side + 'UpLeg'], leg = flyBones[side + 'Leg'], foot = flyBones[side + 'Foot'], toe = flyBones[side + 'ToeBase'];
+    if (arm && fore && hand) {
+      const a = stroke + ph, c = Math.cos(a), sn = Math.sin(a), over = sn < 0 ? -sn : 0;      // over = how far through the recovery, above the water
+      aimBone(arm.bone, fore.bone, sitD.set(sx * (0.16 + 0.5 * over), -sn * (sn > 0 ? 1 : 0.75), -c).normalize().applyQuaternion(sitQ), w);
+      aimBone(fore.bone, hand.bone, sitD.set(sx * (0.1 - 0.25 * over), -sn * (sn > 0 ? 1 : 0.2) - 0.55 * over, -c - 0.35 * over).normalize().applyQuaternion(sitQ), w);
+    }
+    if (up && leg && foot) {
+      const k = Math.sin(stroke * 3 + ph), k2 = Math.sin(stroke * 3 + ph - 0.7);
+      aimBone(up.bone, leg.bone, sitD.set(sx * 0.05, 0.02 + 0.14 * k, 1).normalize().applyQuaternion(sitQ), w);
+      aimBone(leg.bone, foot.bone, sitD.set(sx * 0.03, 0.05 + 0.2 * k2, 1).normalize().applyQuaternion(sitQ), w);
+      if (toe) aimBone(foot.bone, toe.bone, sitD.set(0, -0.12 + 0.1 * k2, 1).normalize().applyQuaternion(sitQ), w);
+    }
+  }
+}
 // Seated legs for either copy of the kid. `f` is which way that copy faces along its own z (the steered one faces -z, the other +z).
 // hang: thighs level in front, shins hanging and swinging in turn; astride: knees out to the sides, shins down; slide: legs stretched out down the chute.
 function sitLegs(w, bones = flyBones, ref = heroTilt, f = -1, how = 'hang') {
@@ -1311,7 +1329,7 @@ function movePlayer(dt) {
     let g2 = castle.groundAt(player.x, player.z, feet);
     const wasSwim = player.swim; player.swim = false;
     if (Math.hypot(player.x - BAY.x, player.z - BAY.z) < BAY.r) {
-      if (heroIx === KID && g2 < BAY.level - (wasSwim ? 0.75 : 0.95) && player.y <= 0.05 && !player.flying) { player.swim = true; g2 = BAY.level - 0.32; }   // afloat, stretched out at the surface
+      if (heroIx === KID && g2 < BAY.level - (wasSwim ? 0.75 : 0.95) && player.y <= 0.05 && !player.flying) { player.swim = true; g2 = BAY.level + 0.02; }   // afloat, stretched out at the surface
       else g2 = Math.max(g2, BAY.level - 0.85);              // in the cove he wades, waist deep at most
     }
     if (player.swim !== wasSwim) { for (let i = 0; i < 12; i++) spawn(player.x + rnd(0.5), BAY.level + 0.1, player.z + rnd(0.5), rnd(1.6), 1.5 + Math.random() * 2.5, rnd(1.6), 0.5 + Math.random() * 0.4, 0.09, { color: 0xeaf7ff, g: 7 }); sfx.whoosh(0.12); }
@@ -1380,7 +1398,8 @@ function step(dtReal) {
   hero.position.set(player.x, player.g + player.y + (HERO.glide ? 0.1 + Math.sin(time * 2.2) * 0.05 : air ? 0 : Math.abs(stride) * (HERO.mount ? 0.3 : 0.09) * fake), player.z);
   const tuck = air && !CLIP.jump ? THREE.MathUtils.clamp(player.vy / JUMP_V, -1, 1) * -0.22 : 0;
   if (HERO.mount) heroTilt.rotation.set(Math.sin(player.walkT * 2 + 0.9) * 0.085 * bob + tuck * 1.3, 0, 0);   // a rocking gallop
-  else if (player.swim) { heroTilt.rotation.set(-1.22, 0, Math.sin(time * (2.2 + 4.2 * bob)) * 0.1); hero.position.y += Math.sin(time * 2.3) * 0.04; if (bob > 0.3 && Math.random() < dtReal * 9) spawn(player.x + rnd(0.5), BAY.level + 0.05, player.z + rnd(0.5), rnd(0.8), 0.8 + Math.random() * 1.4, rnd(0.8), 0.45, 0.07, { color: 0xeaf7ff, g: 7 }); }
+  else if (player.swim) { heroTilt.rotation.set(-1.5, 0, Math.sin(swimT) * 0.16);   // level, rolling a little toward the reaching arm
+ hero.position.y += Math.sin(time * 2.3) * 0.04; if (bob > 0.3 && Math.random() < dtReal * 9) spawn(player.x + rnd(0.5), BAY.level + 0.05, player.z + rnd(0.5), rnd(0.8), 0.8 + Math.random() * 1.4, rnd(0.8), 0.45, 0.07, { color: 0xeaf7ff, g: 7 }); }
   else if (player.flying) heroTilt.rotation.set(-1.05 * bob, 0, Math.sin(time * 2.4) * 0.06);
   else if (HERO.glide) heroTilt.rotation.set(-0.08 * bob + tuck, 0, Math.sin(time * 1.6) * 0.025);   // leans into it, swaying a little
   else heroTilt.rotation.set(-0.16 * fake + tuck, 0, stride * 0.05 * fake);
@@ -1400,7 +1419,7 @@ function step(dtReal) {
     if (mode === 'walk') heroAct.timeScale = HERO.stroll ? 0.7 + player.moving * 1.0 : 0.6 + player.moving * 1.5;
     mixer.update(dtReal);
     flyW += ((heroMode === 'fly' || player.perch || player.swim ? 1 : 0) - flyW) * Math.min(1, dtReal * 8);
-    const stroke = time * (2.2 + 4.2 * player.moving), pull = 28 + 58 * player.moving;
+    swimT += dtReal * (1.3 + 3.4 * player.moving); const stroke = swimT;
     const POSE = player.perch ? SIT_POSE : FLY_POSE;
     wings.visible = heroIx === KID && player.flying && player.y > 0 && !!flyBones.Spine2 && !!wings.userData.ready;   // hers alone, and only in the air
     if (wings.visible) {                                           // they sit between her shoulder blades and beat
@@ -1413,14 +1432,12 @@ function step(dtReal) {
     if (flyW > 0.01 && HERO.fly) for (const n in flyBones) {
       const b = flyBones[n]; let [x, y, z] = POSE[n] || FLY_ZERO;
       if (player.swim) {
-        if (n === 'LeftArm') x = 22 + pull * Math.sin(stroke); else if (n === 'RightArm') x = 22 + pull * Math.sin(stroke + Math.PI);
-        else if (n === 'LeftUpLeg') x = 13 * Math.sin(stroke * 2); else if (n === 'RightUpLeg') x = -13 * Math.sin(stroke * 2);
-        else if (n === 'LeftLeg') x = 10 + 10 * Math.sin(stroke * 2 + 1); else if (n === 'RightLeg') x = 10 - 10 * Math.sin(stroke * 2 + 1);
-        else if (n === 'Head' || n === 'Neck') x = -24;                                // chin up, looking where she is going
+        if (n === 'Head' || n === 'Neck') x = -22;                                     // chin up, looking where she is going
       }
       b.bone.quaternion.slerp(kidQ.copy(b.bind).multiply(kidQ2.setFromEuler(kidE.set(x * D2R, y * D2R, z * D2R))), flyW);
     }
     if (player.perch && HERO.fly) sitLegs(flyW);
+    if (player.swim && HERO.fly) swimLimbs(flyW, stroke);
   }
 
   showAim();
