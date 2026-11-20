@@ -51,36 +51,36 @@ export function buildCastle(scene, { spawn, sfx, addBox }) {
   const [stoneTex, stoneBump] = (() => {
     const N = 512, c = document.createElement('canvas'), b = document.createElement('canvas'); c.width = c.height = b.width = b.height = N;
     const g = c.getContext('2d'), h = b.getContext('2d'), ROWS = 8, RH = N / ROWS;
-    g.fillStyle = '#6f6a60'; g.fillRect(0, 0, N, N); h.fillStyle = '#202020'; h.fillRect(0, 0, N, N);       // mortar
+    g.fillStyle = '#cdbfa6'; g.fillRect(0, 0, N, N); h.fillStyle = '#8a8a8a'; h.fillRect(0, 0, N, N);       // mortar, only a shade darker than the stone
     for (let row = 0; row < ROWS; row++) {
       let x = -Math.random() * 60;
       while (x < N) {
-        const w = 46 + Math.random() * 70, v = 150 + Math.random() * 46, warm = 6 + Math.random() * 16, y = row * RH;
+        const w = 46 + Math.random() * 70, v = 214 + Math.random() * 18, warm = 10 + Math.random() * 8, y = row * RH;
         const hv = 170 + Math.random() * 70;
         const draw = ox => {
-          g.fillStyle = `rgb(${v + warm},${v + warm * 0.4},${v - 10})`; g.fillRect(ox + 2.5, y + 2.5, w - 5, RH - 5);
-          const lg = g.createLinearGradient(0, y, 0, y + RH); lg.addColorStop(0, 'rgba(255,255,255,0.10)'); lg.addColorStop(1, 'rgba(0,0,0,0.16)'); g.fillStyle = lg; g.fillRect(ox + 2.5, y + 2.5, w - 5, RH - 5);
+          g.fillStyle = `rgb(${v + warm},${v + warm * 0.3},${v - 22})`; g.beginPath(); g.roundRect(ox + 2, y + 2, w - 4, RH - 4, 7); g.fill();
+          const lg = g.createLinearGradient(0, y, 0, y + RH); lg.addColorStop(0, 'rgba(255,255,255,0.10)'); lg.addColorStop(1, 'rgba(120,90,50,0.07)'); g.fillStyle = lg; g.beginPath(); g.roundRect(ox + 2, y + 2, w - 4, RH - 4, 7); g.fill();
           h.fillStyle = `rgb(${hv},${hv},${hv})`; h.fillRect(ox + 4, y + 4, w - 8, RH - 8);
         };
         draw(x); if (x + w > N) draw(x - N);
         x += w;
       }
     }
-    for (let i = 0; i < 5200; i++) { const x = Math.random() * N, y = Math.random() * N, d = Math.random() < 0.55; g.fillStyle = d ? 'rgba(40,36,30,0.10)' : 'rgba(255,250,235,0.08)'; g.fillRect(x, y, 2 + Math.random() * 3, 1 + Math.random() * 2); h.fillStyle = d ? 'rgba(0,0,0,0.12)' : 'rgba(255,255,255,0.10)'; h.fillRect(x, y, 2, 2); }
-    for (let i = 0; i < 26; i++) { const x = Math.random() * N, y = Math.random() * N, lg = g.createLinearGradient(0, y, 0, y + 90); lg.addColorStop(0, 'rgba(50,48,40,0.20)'); lg.addColorStop(1, 'rgba(50,48,40,0)'); g.fillStyle = lg; g.fillRect(x, y, 5 + Math.random() * 14, 90); }   // rain streaks
+    for (let i = 0; i < 900; i++) { const x = Math.random() * N, y = Math.random() * N, d = Math.random() < 0.55; g.fillStyle = d ? 'rgba(120,100,70,0.05)' : 'rgba(255,252,240,0.08)'; g.fillRect(x, y, 2 + Math.random() * 3, 1 + Math.random() * 2); h.fillStyle = d ? 'rgba(0,0,0,0.12)' : 'rgba(255,255,255,0.10)'; h.fillRect(x, y, 2, 2); }
+    for (let i = 0; i < 0; i++) { const x = Math.random() * N, y = Math.random() * N, lg = g.createLinearGradient(0, y, 0, y + 90); lg.addColorStop(0, 'rgba(50,48,40,0.20)'); lg.addColorStop(1, 'rgba(50,48,40,0)'); g.fillStyle = lg; g.fillRect(x, y, 5 + Math.random() * 14, 90); }   // rain streaks
     const mk = cv => { const t = new THREE.CanvasTexture(cv); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 8; return t; };
     const t = mk(c); t.colorSpace = THREE.SRGBColorSpace; return [t, mk(b)];
   })();
-  const STONE = new THREE.MeshStandardMaterial({ map: stoneTex, bumpMap: stoneBump, bumpScale: 3, roughness: 1, side: THREE.DoubleSide });
+  const STONE = new THREE.MeshStandardMaterial({ map: stoneTex, bumpMap: stoneBump, bumpScale: 0.8, roughness: 0.9, side: THREE.DoubleSide });
   const WALLS = STONE.clone(); WALLS.vertexColors = true;      // the big stonework is also shaded by hand: damp and mossy low down
-  const DARK = new THREE.MeshStandardMaterial({ color: 0x8d8576, roughness: 1 }), ROOF = new THREE.MeshStandardMaterial({ color: 0x3e4b5c, roughness: 0.6, metalness: 0.15 });
-  const WOOD = new THREE.MeshStandardMaterial({ color: 0x8a5a34, roughness: 0.85 }), GOLD = new THREE.MeshStandardMaterial({ color: 0xf2c84a, roughness: 0.35, metalness: 0.6 });
+  const DARK = new THREE.MeshStandardMaterial({ color: 0xc4b392, roughness: 0.9 }), ROOF = new THREE.MeshStandardMaterial({ color: 0x4a7ec2, roughness: 0.65 });
+  const WOOD = new THREE.MeshStandardMaterial({ color: 0xb37a45, roughness: 0.8 }), GOLD = new THREE.MeshStandardMaterial({ color: 0xf2c84a, roughness: 0.35, metalness: 0.6 });
   const IRON = new THREE.MeshStandardMaterial({ color: 0x3a3d44, roughness: 0.5, metalness: 0.5 });
   {
     const pos = [], uv = [], col = [];
     const quad = (a, b, c, d, kind) => { for (const p of [a, b, c, a, c, d]) {
       pos.push(p[0], p[1], p[2]); uv.push((kind === 'x' ? p[2] : p[0]) / 3.2, (kind === 'y' ? p[2] : p[1]) / 3.2);
-      const low = Math.max(0, 1 - p[1] / 2.2), n = 0.5 + 0.5 * Math.sin(p[0] * 0.9 + p[2] * 1.3), moss = kind === 'y' ? 0 : low * low * (0.35 + 0.45 * n), sh = kind === 'y' ? 1.06 : 0.82 + 0.18 * Math.min(1, p[1] / 3);
+      const low = Math.max(0, 1 - p[1] / 1.4), moss = kind === 'y' ? 0 : low * low * 0.35, sh = kind === 'y' ? 1.04 : 0.93 + 0.07 * Math.min(1, p[1] / 3);
       col.push(sh * (1 - moss * 0.34), sh * (1 - moss * 0.16), sh * (1 - moss * 0.42));
     } };
     for (const s of SOLIDS) {
@@ -119,7 +119,7 @@ export function buildCastle(scene, { spawn, sfx, addBox }) {
     const m = add(g, FLAG, x, y + 2.1 * s, z, false); flags.push(m); return m;
   };
   const cylUV = (geo, r, h) => { const u = geo.attributes.uv; for (let k = 0; k < u.count; k++) u.setXY(k, u.getX(k) * 6.283 * r / 3.2, u.getY(k) * h / 3.2); return geo; };
-  const HOLE = new THREE.MeshBasicMaterial({ color: 0x15161a });
+  const HOLE = new THREE.MeshBasicMaterial({ color: 0x4a3b33 });
   for (const [x, z, r, h] of TURRETS) {
     add(cylUV(new THREE.CylinderGeometry(r, r, h, 28, 1, true), r, h), STONE, x, h / 2, z);
     add(cylUV(new THREE.CylinderGeometry(r, r * 1.22, 2.2, 28, 1, true), r, 2.2), STONE, x, 1.1, z);                      // flared foot
@@ -194,10 +194,10 @@ export function buildCastle(scene, { spawn, sfx, addBox }) {
     for (let k = 0; k < 4; k++) { const f = new THREE.Mesh(new THREE.SphereGeometry(0.16, 10, 8), new THREE.MeshStandardMaterial({ color: pick([0xe2503c, 0xf2c230, 0x8ac24a, 0xf08a3c]) })); f.position.set(-1 + k * 0.65, 1.1, rnd(-0.3, 0.3)); st.add(f); }
   }
   {
-    const c = document.createElement('canvas'); c.width = c.height = 256; const g = c.getContext('2d'); g.fillStyle = '#5d584f'; g.fillRect(0, 0, 256, 256);
-    for (let i = 0; i < 156; i++) { const x = (i % 12) * 21.4 + ((Math.floor(i / 12) % 2) * 10.7), y = Math.floor(i / 12) * 19.7, v = 128 + Math.random() * 50; g.fillStyle = `rgb(${v + 8},${v + 2},${v - 10})`; g.beginPath(); g.ellipse(x + 10 + Math.random() * 2, y + 10 + Math.random() * 2, 8.6 + Math.random() * 1.4, 8 + Math.random() * 1.5, Math.random() * 3, 0, 6.283); g.fill(); }
+    const c = document.createElement('canvas'); c.width = c.height = 256; const g = c.getContext('2d'); g.fillStyle = '#c9b990'; g.fillRect(0, 0, 256, 256);
+    for (let i = 0; i < 156; i++) { const x = (i % 12) * 21.4 + ((Math.floor(i / 12) % 2) * 10.7), y = Math.floor(i / 12) * 19.7, v = 208 + Math.random() * 22; g.fillStyle = `rgb(${v + 12},${v + 2},${v - 30})`; g.beginPath(); g.ellipse(x + 10 + Math.random() * 2, y + 10 + Math.random() * 2, 8.6 + Math.random() * 1.4, 8 + Math.random() * 1.5, Math.random() * 3, 0, 6.283); g.fill(); }
     const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(22, 22); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8;
-    const yard = new THREE.Mesh(new THREE.PlaneGeometry(2 * S + 0.4, 2 * S + 0.4), new THREE.MeshStandardMaterial({ map: t, bumpMap: t, bumpScale: 2, roughness: 1 })); yard.rotation.x = -Math.PI / 2; yard.position.y = 0.04; yard.receiveShadow = true; group.add(yard);
+    const yard = new THREE.Mesh(new THREE.PlaneGeometry(2 * S + 0.4, 2 * S + 0.4), new THREE.MeshStandardMaterial({ map: t, bumpMap: t, bumpScale: 0.6, roughness: 1 })); yard.rotation.x = -Math.PI / 2; yard.position.y = 0.04; yard.receiveShadow = true; group.add(yard);
     const HAY = new THREE.MeshStandardMaterial({ color: 0xd8b84e, roughness: 1 });
     for (const [x, z] of [[20.5, 20], [21.6, 20.6], [20.9, 21.5], [-21, -20], [-20, -21.2], [12.2, 15.6], [17, 3.4]]) { add(new THREE.CylinderGeometry(0.42, 0.36, 1.0, 14), WOOD, x, 0.5, z); for (const y of [0.25, 0.75]) add(new THREE.CylinderGeometry(0.43, 0.43, 0.07, 14), IRON, x, y, z, false); }
     // a lean-to against the east wall, with hay in it
