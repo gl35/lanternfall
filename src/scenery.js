@@ -218,16 +218,36 @@ function sky() {
       sun: { value: new THREE.Vector3() }, sunAmt: { value: 1 },
       zenith: { value: new THREE.Color() }, mid: { value: new THREE.Color() },
       horizon: { value: new THREE.Color() }, glow: { value: new THREE.Color() },
+      uT: { value: 0 }, cloudCol: { value: new THREE.Color(0xffffff) }, shadeCol: { value: new THREE.Color(0x8fa8c8) }, cover: { value: 0.5 },
     },
     vertexShader: `varying vec3 vDir; void main(){ vDir = normalize(position);
       gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
-    fragmentShader: `varying vec3 vDir; uniform vec3 sun, zenith, mid, horizon, glow; uniform float sunAmt;
+    fragmentShader: `varying vec3 vDir; uniform vec3 sun, zenith, mid, horizon, glow, cloudCol, shadeCol; uniform float sunAmt, uT, cover;
+      float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+      float vn(vec2 p){ vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+        return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), f.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), f.x), f.y); }
+      float fbm(vec2 p){ float a = 0.5, s = 0.0; for (int k = 0; k < 4; k++) { s += a * vn(p); p = p * 2.03 + vec2(17.0, 9.0); a *= 0.5; } return s; }
       void main(){ vec3 d = normalize(vDir); float h = clamp(d.y, 0.0, 1.0);
         vec3 c = mix(horizon, mid, smoothstep(0.0, 0.2, h));
         c = mix(c, zenith, smoothstep(0.15, 0.75, h));
         float s = max(dot(d, sun), 0.0);
         c += sunAmt * glow * (pow(s, 8.0) * 0.25 + pow(s, 80.0) * 0.6);
         c += sunAmt * vec3(1.0, 0.97, 0.88) * smoothstep(0.9990, 0.9996, s) * 5.0;
+        if (d.y > 0.0) {
+          vec2 q = d.xz / (d.y + 0.2), w = vec2(uT * 0.011, uT * 0.004);          // the dome flattened out to a ceiling of cloud
+          float big = fbm(q * 0.7 + w), fine = fbm(q * 3.1 + w * 1.8 + big * 1.6);
+          float body = big * 0.86 + fine * 0.3;                                         // big heaps, their edges broken into billows
+          float den = smoothstep(cover, cover + 0.075, body);
+          vec2 sd = normalize(sun.xz + vec2(1e-4)) * 0.2;
+          float toward = fbm((q + sd) * 0.7 + w) * 0.86 + fine * 0.3;                // thinner on the sun side means that side is lit
+          float lit = clamp(0.5 + (body - toward) * 6.5 + (fine - 0.47) * 1.6 - (body - cover) * 1.4, 0.0, 1.0);   // bright sunward billows, grey thick middles and undersides
+          vec3 cc = mix(shadeCol, cloudCol, lit);
+          cc = mix(cc, cloudCol, smoothstep(0.0, 0.5, den) * (1.0 - smoothstep(0.5, 1.0, den)) * 0.35);   // thin edges glow
+          cc += sunAmt * glow * pow(s, 5.0) * 0.3;
+          float high = smoothstep(0.52, 0.8, fbm(vec2(q.x * 0.35 + uT * 0.02, q.y * 1.6))) * 0.3 * smoothstep(0.25, 0.6, d.y);   // thin streaks far above
+          c = mix(c, vec3(1.0), high * (1.0 - den));
+          c = mix(c, cc, den * smoothstep(0.02, 0.2, d.y));
+        }
         c = mix(c, horizon, 1.0 - smoothstep(-0.25, 0.0, d.y));
         gl_FragColor = vec4(c, 1.0);
         #include <tonemapping_fragment>
@@ -411,8 +431,8 @@ function grassField(r, U, o) {
   const mat = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
   mat.customProgramCacheKey = () => 'grass' + o.tile;     // the two layers compile different shaders
   mat.onBeforeCompile = s => {
-    s.uniforms.uTime = U.time; s.uniforms.uCenter = U.center; s.uniforms.uSnow = U.snow;
-    s.vertexShader = `uniform float uTime, uSnow; uniform vec2 uCenter; vec2 wrapOff; float bend, ground;\n` + HILL_GLSL + '\n' + s.vertexShader
+    s.uniforms.uTime = U.time; s.uniforms.uWind = U.wind; s.uniforms.uCenter = U.center; s.uniforms.uSnow = U.snow;
+    s.vertexShader = `uniform float uTime, uSnow, uWind; uniform vec2 uCenter; vec2 wrapOff; float bend, ground;\n` + HILL_GLSL + '\n' + s.vertexShader
       .replace('#include <begin_vertex>', `#include <begin_vertex>
         vec3 ip = instanceMatrix[3].xyz;
         vec2 wp = mod(ip.xz - uCenter + ${H}, ${T}) - ${H} + uCenter;
@@ -428,7 +448,7 @@ function grassField(r, U, o) {
         float gust = sin(wp.x * 0.21 + wp.y * 0.12 - uTime * 1.5 + sin(wp.y * 0.08 + uTime * 0.25) * 2.2) * 0.5 + 0.5;
         gust = gust * gust * (0.75 + 0.25 * sin(wp.x * 0.05 - wp.y * 0.07 + uTime * 0.4));
         float flutter = sin(uTime * 4.3 + wp.x * 2.1 - wp.y * 1.7) * 0.07;
-        bend = (0.1 + gust * 0.62 + flutter) * mix(1.0, 1.5, uSnow);
+        bend = (0.05 + (gust * 0.62 + flutter) * uWind) * mix(1.0, 1.5, uSnow);
         transformed.y *= mix(1.0, 0.5, uSnow);
         ${o.mode === 'far' ? 'transformed.xz *= mix(1.0, 1.7, smoothstep(18.0, 32.0, dC));' : ''}
         transformed *= keep;
@@ -493,14 +513,14 @@ function clumpMaterial(U) {
   const mat = clumpMat = new THREE.MeshBasicMaterial({ map: clumpTexture(rng(9)), alphaTest: 0.5, side: THREE.DoubleSide, toneMapped: false });
   mat.customProgramCacheKey = () => 'leafclumps';
   mat.onBeforeCompile = s => {
-    s.uniforms.uTime = U.time;
-    s.vertexShader = 'uniform float uTime;\n' + s.vertexShader.replace('#include <project_vertex>', `
+    s.uniforms.uTime = U.time; s.uniforms.uWind = U.wind;
+    s.vertexShader = 'uniform float uTime, uWind;\n' + s.vertexShader.replace('#include <project_vertex>', `
       vec3 lc = instanceMatrix[3].xyz; float lsz = length(instanceMatrix[0].xyz) * length(modelMatrix[0].xyz);
       float lh = fract(sin(dot(lc.xz, vec2(12.9898, 78.233)) + lc.y * 3.1) * 43758.5453);
       vec4 wc = modelMatrix * vec4(lc, 1.0);
-      float la = lh * 6.2832 + sin(uTime * 1.4 + wc.x * 0.7 + wc.z * 0.5) * 0.14;
+      float la = lh * 6.2832 + sin(uTime * 1.4 + wc.x * 0.7 + wc.z * 0.5) * (0.04 + 0.13 * uWind);
       vec2 lq = vec2(position.x * cos(la) - position.y * sin(la), position.x * sin(la) + position.y * cos(la)) * lsz;
-      wc.x += sin(uTime * 1.1 + wc.z * 0.4 + wc.y) * 0.05 * lsz;
+      wc.x += sin(uTime * 1.1 + wc.z * 0.4 + wc.y) * (0.012 + 0.05 * uWind) * lsz;
       vec4 mvPosition = viewMatrix * wc;
       mvPosition.xy += lq;
       gl_Position = projectionMatrix * mvPosition;`);
@@ -573,11 +593,11 @@ const GUST_GLSL = `float gustAt(vec2 wp, float t) {
 function swayWithGrass(mat, U) {
   mat.customProgramCacheKey = () => 'flower-sway';
   mat.onBeforeCompile = s => {
-    s.uniforms.uTime = U.time;
-    s.vertexShader = 'uniform float uTime;\n' + GUST_GLSL + '\n' + s.vertexShader.replace('#include <project_vertex>', `
+    s.uniforms.uTime = U.time; s.uniforms.uWind = U.wind;
+    s.vertexShader = 'uniform float uTime, uWind;\n' + GUST_GLSL + '\n' + s.vertexShader.replace('#include <project_vertex>', `
       vec4 mvPosition = instanceMatrix * vec4(transformed, 1.0);
       vec3 fo = instanceMatrix[3].xyz;
-      float fb = gustAt(fo.xz, uTime), lean = fb * fo.y * fo.y;
+      float fb = gustAt(fo.xz, uTime) * (0.15 + 0.85 * uWind), lean = fb * fo.y * fo.y;
       vec3 off = mvPosition.xyz - fo;
       mvPosition.xz += vec2(0.86, 0.5) * lean;
       mvPosition.y -= lean * lean * 0.25 + dot(off.xz, vec2(0.86, 0.5)) * fb * 0.9;      // the head tips over as it leans
@@ -722,7 +742,8 @@ export function buildScenery(scene) {
   const r = rng(20261117);
   const bark = barkTexture(rng(5)); bark.repeat.set(3, 1);
   trunkMat.map = bark; trunkMat.bumpMap = bark; trunkMat.bumpScale = 2.5; trunkMat.needsUpdate = true;
-  const U = { time: { value: 0 }, center: { value: new THREE.Vector2(START.x, START.z) }, snow: { value: 0 } };
+  const U = { time: { value: 0 }, wind: { value: 1 }, center: { value: new THREE.Vector2(START.x, START.z) }, snow: { value: 0 } };
+  let lastT = 0;
   const skyMesh = sky(); scene.add(skyMesh);
   const sea = cloudSea(r); scene.add(sea.group);
   const heaps = cumulus(r); scene.add(heaps);
@@ -782,7 +803,8 @@ export function buildScenery(scene) {
     land.material.vertexColors = !S.snow; land.material.color.set(S.snow ? 0xf0f4f9 : 0xffffff); land.material.needsUpdate = true;
     woods.visible = !S.snow;
     U.snow.value = S.snow;
-    heaps.visible = blooms.visible = foliage.visible = seeds.visible = !S.snow; flakes.visible = !!S.snow;
+    heaps.visible = false; blooms.visible = foliage.visible = seeds.visible = !S.snow; flakes.visible = !!S.snow;
+    u.cloudCol.value.set(S.cloud[0]); u.shadeCol.value.set(S.cloud[1]); u.cover.value = S.snow ? 0.4 : 0.565;
     for (const t of trees) { t.userData.leaves.visible = !S.snow; t.userData.bare.visible = !!S.snow; }
   }
   setSeason('summer');
@@ -792,6 +814,7 @@ export function buildScenery(scene) {
     // 0.3 .. 1: draw that fraction of the grass and leaves (instances are in random order, so it thins evenly)
     setDetail(q) { detailQ = q; lodT = -1; for (const m of [grassNear, grassFar, foliage, woods.userData.leaves]) m.count = Math.floor(m.userData.full * q); },
     get season() { return season; },
+    get wind() { return U.wind.value; }, get windTime() { return U.time.value; },
     // a tree is bare when (nearly) none of its leaves are being drawn
     isBare(i) { return season !== 'summer' || (foliage.count - i * LEAVES_PER) / LEAVES_PER < 0.35; },
     // the limbs of tree i as world-space segments, each with the radius of the limb along it
@@ -800,7 +823,12 @@ export function buildScenery(scene) {
       return t.userData.limbs.map(([a, b]) => ({ a: a.clone().applyMatrix4(t.matrixWorld), b: b.clone().applyMatrix4(t.matrixWorld), r0: 0.15 * t.scale.x, r1: 0.05 * t.scale.x }));
     },
     update(t, px, pz, camera, pixelRatio = 1, py = 0) {
-      U.time.value = t; U.center.value.set(px, pz);
+      // the wind: a slow swell between near calm and a stiff breeze, with shorter gusts riding on it
+      const swell = 0.5 + 0.5 * Math.sin(t * 0.085 + 1.4 * Math.sin(t * 0.027)), puff = Math.max(0, Math.sin(t * 0.37 + 2.0 * Math.sin(t * 0.11))) ** 3;
+      U.wind.value = Math.min(1.9, 0.12 + 1.15 * swell * swell + 0.65 * puff * (0.3 + swell));
+      U.time.value += Math.min(0.1, Math.max(0, t - lastT)) * (0.3 + 0.75 * U.wind.value); lastT = t;
+      skyMesh.material.uniforms.uT.value = U.time.value;
+      U.center.value.set(px, pz);
       if (woods.visible && Math.abs(t - lodT) > 0.2) { lodT = t; woods.userData.lod(px, pz, detailQ); } sea.group.rotation.y = t * 0.003; heaps.rotation.y = t * 0.0016;
       sun.target.position.set(px, py, pz); sun.position.set(px + SUN_DIR.x * 60, py + SUN_DIR.y * 60, pz + SUN_DIR.z * 60);
       for (const f of [flakes, seeds]) if (f.visible) { f.material.uniforms.uCam.value.copy(camera.position); f.material.uniforms.uSize.value = pixelRatio; }

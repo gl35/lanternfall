@@ -874,11 +874,11 @@ function updatePlay(dt) {
     rd.speed += (rd.want - rd.speed) * Math.min(1, dt * 0.8); rd.seat.rotation.y -= rd.speed * dt;
     ss.amp += (ss.want - ss.amp) * Math.min(1, dt * 0.9); ss.seat.rotation.z = Math.sin(time * 1.7) * ss.amp;
     for (const d of play.deco) {
-      const gust = Math.sin(d.x * 0.21 + d.z * 0.12 - time * 1.5 + Math.sin(d.z * 0.08 + time * 0.25) * 2.2) * 0.5 + 0.5, g2 = gust * gust;
-      if (d.kind === 'balloon') { d.o.rotation.z = -0.06 - g2 * 0.26 + Math.sin(time * 1.7 + d.ph) * 0.05; d.o.rotation.x = Math.sin(time * 1.3 + d.ph * 1.7) * 0.07 + g2 * 0.08; d.b.rotation.y = Math.sin(time * 0.6 + d.ph) * 0.5; }
+      const wt = scenery.windTime, ws = scenery.wind, gust = (Math.sin(d.x * 0.21 + d.z * 0.12 - wt * 1.5 + Math.sin(d.z * 0.08 + wt * 0.25) * 2.2) * 0.5 + 0.5) * (0.15 + 0.85 * ws), g2 = gust * gust;
+      if (d.kind === 'balloon') { d.o.rotation.z = -0.03 - Math.min(0.75, g2 * 0.3) + Math.sin(wt * 1.7 + d.ph) * 0.05; d.o.rotation.x = Math.sin(wt * 1.3 + d.ph * 1.7) * 0.07 + g2 * 0.08; d.b.rotation.y = Math.sin(wt * 0.6 + d.ph) * 0.5; }
       else {
-        d.o.rotation.x = 0.08 + g2 * 0.75 + Math.sin(time * 4.6 + d.ph) * 0.1 * (0.4 + gust);
-        const p = d.f.geometry.attributes.position; for (let k = 0; k < p.count; k++) { const t = -p.getY(k) / 0.92; p.setZ(k, Math.sin(t * 4.2 - time * 7 + d.ph) * 0.07 * t * (0.5 + gust)); } p.needsUpdate = true;
+        d.o.rotation.x = 0.04 + Math.min(1.2, g2 * 0.8) + Math.sin(wt * 4.6 + d.ph) * 0.1 * (0.2 + gust);
+        const p = d.f.geometry.attributes.position; for (let k = 0; k < p.count; k++) { const t = -p.getY(k) / 0.92; p.setZ(k, Math.sin(t * 4.2 - wt * 7 + d.ph) * 0.07 * t * (0.25 + gust)); } p.needsUpdate = true;
       }
     }
     const mb = play.bars, sd = play.sand;
