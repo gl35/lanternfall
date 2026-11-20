@@ -42,7 +42,7 @@ export function buildCastle(scene, { spawn, sfx, addBox }) {
   solid(-7, -4.5, -15.5, -6.5, { axis: 'z', a: -6.5, b: -15.5, ha: 5, hb: 11 }, 5);                        // first terrace to the top
   solid(-1.5, 1.5, -S + T, -18, { axis: 'z', a: -18, b: -S + T, ha: 5, hb: WH }, 4.4);                      // a bridge to the back wall
   // in the yard
-  solid(-2.1, 2.1, 8, 12.2, 0.55, 0, { draw: false }); solid(-0.5, 0.5, 9.6, 10.6, 2.3, 0, { draw: false });  // fountain
+  solid(-2.3, 2.3, 7.8, 12.4, 0.6, 0, { draw: false }); solid(-0.9, 0.9, 9.2, 11.0, 3.4, 0, { draw: false });  // fountain
   solid(-15, -13.2, 11.2, 13, 1.0, 0, { draw: false });                                                    // well
   solid(11.5, 14.5, 13.3, 14.7, 0.95); solid(14.2, 15.6, 1, 4, 0.95);                                        // stall tables
   solid(-19.5, -17.9, 14.5, 16.1, 0.8); solid(-17.8, -16.2, 15, 16.6, 0.8); solid(-18.8, -17.2, 14.9, 16.5, 1.6, 0.8); solid(15, 17, -15, -13, 1.1);   // crates
@@ -87,7 +87,7 @@ export function buildCastle(scene, { spawn, sfx, addBox }) {
       if (!s.draw) continue;
       const { x0, x1, z0, z1, y0 } = s, a = s.top(x0, z0), b = s.top(x1, z0), c = s.top(x1, z1), d = s.top(x0, z1);
       quad([x0, a, z0], [x0, d, z1], [x1, c, z1], [x1, b, z0], 'y');
-      if (y0 > 0) quad([x0, y0, z0], [x1, y0, z0], [x1, y0, z1], [x0, y0, z1], 'y');
+      if (y0 > 0 && y0 !== 5 && y0 !== WH) quad([x0, y0, z0], [x1, y0, z0], [x1, y0, z1], [x0, y0, z1], 'y');   // an underside only where there is air below it
       quad([x0, y0, z0], [x1, y0, z0], [x1, b, z0], [x0, a, z0], 'z'); quad([x1, y0, z1], [x0, y0, z1], [x0, d, z1], [x1, c, z1], 'z');
       quad([x0, y0, z1], [x0, y0, z0], [x0, a, z0], [x0, d, z1], 'x'); quad([x1, y0, z0], [x1, y0, z1], [x1, c, z1], [x1, b, z0], 'x');
     }
@@ -166,7 +166,7 @@ export function buildCastle(scene, { spawn, sfx, addBox }) {
   for (let k = 0; k < 4; k++) { const m = new THREE.Mesh(new THREE.BoxGeometry(2 * G - 0.2, 0.12, 0.1), IRON); m.position.set(0, 0.5 + k * 1.1, 0); gate.add(m); }
   for (const sx of [-1, 1]) { const b = add(new THREE.PlaneGeometry(1.3, 3.4), FLAG, sx * 9.5, 3.9, S + 0.06, false); flags.push(b); b.userData.hang = true; }
   for (const [x, z] of [[-4.5, -15.5], [4.5, -15.5], [-4.5, -6.5], [4.5, -6.5]]) add(new THREE.BoxGeometry(0.9, 6.3, 0.9), STONE, x, 8.1, z);       // corner buttresses
-  for (const y of [8.2, 10.9]) add(new THREE.BoxGeometry(9.3, 0.2, 9.3), DARK, 0, y, -11, false);
+  for (const y of [8.2, 10.72]) add(new THREE.BoxGeometry(9.3, 0.2, 9.3), DARK, 0, y, -11, false);   // kept below the terrace floor, never level with it
   for (const [x, z, turn] of [[0, -6.44, 0], [-4.56, -11, 1], [4.56, -11, 1], [0, -15.56, 0]]) for (const dx of [-2.1, 2.1]) {
     const px = x + (turn ? 0 : dx), pz = z + (turn ? dx : 0), ry = turn ? Math.PI / 2 : 0;
     add(new THREE.BoxGeometry(0.75, 1.5, 0.14), HOLE, px, 9.3, pz, false).rotation.y = ry;
@@ -182,10 +182,70 @@ export function buildCastle(scene, { spawn, sfx, addBox }) {
   { const b = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.62, 0.9, 16, 1, true), GOLD); b.position.y = -0.55; b.castShadow = true; const cap = new THREE.Mesh(new THREE.SphereGeometry(0.3, 12, 8), GOLD); cap.position.y = -0.12; bell.add(b, cap); }
   flag(0, 16.6, -11, 1.5);
   // fountain, well, stalls
-  add(new THREE.CylinderGeometry(2.2, 2.4, 0.55, 28), STONE, 0, 0.275, 10.1); add(new THREE.CylinderGeometry(0.42, 0.55, 2.3, 14), STONE, 0, 1.15, 10.1); add(new THREE.CylinderGeometry(1.0, 0.3, 0.3, 20), STONE, 0, 2.4, 10.1);
-  const WATER = new THREE.MeshStandardMaterial({ color: 0x7fd0f0, roughness: 0.15, transparent: true, opacity: 0.75 });
-  add(new THREE.CylinderGeometry(1.95, 1.95, 0.08, 28), WATER, 0, 0.56, 10.1, false);
-  const jets = []; for (let k = 0; k < 5; k++) { const a = k * 1.2566, j = add(new THREE.CylinderGeometry(0.02, 0.07, 1, 6), WATER, k ? Math.cos(a) * 0.55 : 0, 2.55, 10.1 + (k ? Math.sin(a) * 0.55 : 0), false); j.geometry.translate(0, 0.5, 0); jets.push(j); }
+  const FX = 0, FZ = 10.1, WT = { value: 0 }, WPLAY = { value: 0 }, WTINT = { value: new THREE.Color(0xffffff) };
+  {
+    // stonework: a wide basin with a rolled rim, a stem, a broad bowl, a second stem, a small top bowl
+    const lathe = (pts, mat, y = 0) => { const m = add(new THREE.LatheGeometry(pts.map(p => new THREE.Vector2(p[0], p[1])), 40), mat, FX, y, FZ); return m; };
+    lathe([[2.42, 0], [2.42, 0.42], [2.3, 0.6], [2.12, 0.6], [2.05, 0.5], [2.05, 0.12], [0, 0.12]], STONE);
+    lathe([[0.62, 0.1], [0.42, 0.5], [0.3, 1.2], [0.36, 1.75], [0.55, 1.95], [1.25, 2.12], [1.34, 2.3], [1.22, 2.3], [1.12, 2.2], [0.3, 2.08], [0, 2.08]], STONE);
+    lathe([[0.3, 2.05], [0.2, 2.6], [0.26, 3.0], [0.58, 3.15], [0.64, 3.3], [0.54, 3.3], [0.5, 3.22], [0.14, 3.14], [0.09, 3.55], [0, 3.55]], STONE);
+    // still water lying in each bowl: ripples running out from where the falls land, glints of sun, foam
+    const surf = (R, y, land, k) => {
+      const mat = new THREE.ShaderMaterial({
+        transparent: true, uniforms: { uTime: WT, uPlay: WPLAY, uTint: WTINT, uR: { value: R }, uLand: { value: land }, uK: { value: k } },
+        vertexShader: 'varying vec2 vP; varying vec3 vW; void main() { vP = position.xy; vec4 w = modelMatrix * vec4(position, 1.0); vW = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }',
+        fragmentShader: `uniform float uTime, uPlay, uR, uLand, uK; uniform vec3 uTint; varying vec2 vP; varying vec3 vW;
+          float hgt(vec2 p) {
+            float r = length(p), a = atan(p.y, p.x);
+            float ring = sin(r * uK - uTime * 7.0 + sin(a * 5.0) * 0.6) * exp(-abs(r - uLand) * 1.4) * (0.75 + uPlay * 0.6);
+            float chop = sin(p.x * 5.1 + uTime * 2.3) * sin(p.y * 4.3 - uTime * 1.9) * 0.28 + sin((p.x + p.y) * 9.0 - uTime * 3.4) * 0.12;
+            return ring + chop;
+          }
+          void main() {
+            float r = length(vP); if (r > uR) discard;
+            float e = 0.03, h = hgt(vP), hx = hgt(vP + vec2(e, 0.0)) - h, hy = hgt(vP + vec2(0.0, e)) - h;
+            vec3 n = normalize(vec3(-hx / e * 0.09, 1.0, hy / e * 0.09)), V = normalize(cameraPosition - vW), L = normalize(vec3(0.45, 0.8, 0.35));
+            float fres = pow(1.0 - max(dot(n, V), 0.0), 3.0);
+            vec3 deep = vec3(0.07, 0.36, 0.47), shal = vec3(0.30, 0.72, 0.80);
+            vec3 col = mix(deep, shal, 0.45 + 0.4 * h + 0.25 * smoothstep(uR * 0.5, uR, r)) * uTint;
+            col = mix(col, vec3(0.80, 0.91, 1.0), fres * 0.75);
+            float spec = pow(max(dot(reflect(-L, n), V), 0.0), 90.0);
+            float glit = pow(max(dot(reflect(-L, normalize(n + vec3(sin(vP.x * 41.0 + uTime * 3.0), 0.0, sin(vP.y * 37.0 - uTime * 2.6)) * 0.12)), V), 0.0), 240.0);
+            col += vec3(1.0, 0.97, 0.88) * (spec * 0.9 + glit * 1.6);
+            float foam = smoothstep(0.34, 0.0, abs(r - uLand)) * (0.55 + 0.45 * sin(atan(vP.y, vP.x) * 34.0 + uTime * 11.0 + r * 30.0));
+            foam = max(foam, smoothstep(uR - 0.1, uR, r) * 0.5);
+            col = mix(col, vec3(1.0), clamp(foam, 0.0, 1.0) * 0.8);
+            gl_FragColor = vec4(col, 0.93);
+          }`,
+      });
+      const m = new THREE.Mesh(new THREE.CircleGeometry(R, 48), mat); m.rotation.x = -Math.PI / 2; m.position.set(FX, y, FZ); m.renderOrder = 1; group.add(m);
+    };
+    surf(2.08, 0.5, 1.5, 9.0); surf(1.2, 2.24, 0.62, 16.0); surf(0.52, 3.26, 0.16, 26.0);
+    // falling water: a sheet poured from each rim, drawn as streaks sliding down it, and a bell of water thrown up from the spout
+    const fallMat = (streaks, speed) => new THREE.ShaderMaterial({
+      transparent: true, depthWrite: false, side: THREE.DoubleSide, uniforms: { uTime: WT, uPlay: WPLAY, uTint: WTINT, uN: { value: streaks }, uV: { value: speed } },
+      vertexShader: 'varying vec2 vU; void main() { vU = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+      fragmentShader: `uniform float uTime, uPlay, uN, uV; uniform vec3 uTint; varying vec2 vU;
+        void main() {
+          float a = vU.x * 6.2832, s = vU.y;
+          float streak = 0.5 + 0.5 * sin(a * uN + sin(s * 7.0 - uTime * uV * 0.6) * 1.2);
+          float flow = 0.5 + 0.5 * sin(s * 34.0 - uTime * uV * 2.4 + sin(a * 19.0) * 3.0);
+          float fine = 0.5 + 0.5 * sin(a * uN * 3.7 + s * 60.0 - uTime * uV * 3.1);
+          float body = streak * (0.55 + 0.45 * flow) * (0.7 + 0.3 * fine);
+          float alpha = (0.2 + 0.62 * body) * smoothstep(0.0, 0.05, s) * (1.0 - 0.25 * s);
+          vec3 col = mix(vec3(0.55, 0.83, 0.95) * uTint, vec3(1.0), body * 0.75 + s * 0.2);
+          gl_FragColor = vec4(col, alpha);
+        }`,
+    });
+    const fall = (r0, y0, y1, out, mat) => {                 // from a rim at r0, y0 down to y1, thrown outward a little as it goes
+      const pts = []; for (let k = 0; k <= 14; k++) { const t = k / 14; pts.push(new THREE.Vector2(r0 + out * t, y0 - (y0 - y1) * t * t)); }
+      const m = new THREE.Mesh(new THREE.LatheGeometry(pts, 48), mat); m.position.set(FX, 0, FZ); m.renderOrder = 2; group.add(m); return m;
+    };
+    fall(1.3, 2.28, 0.52, 0.22, fallMat(26, 3.2)); fall(0.6, 3.3, 2.26, 0.05, fallMat(15, 2.6));
+    const bellPts = []; for (let k = 0; k <= 18; k++) { const t = k / 18; bellPts.push(new THREE.Vector2(0.03 + 0.42 * t, 0.62 * Math.sin(Math.min(1, t * 1.25) * Math.PI) * (1 - 0.3 * t) - 0.28 * t * t)); }
+    const bellMesh = new THREE.Mesh(new THREE.LatheGeometry(bellPts, 36), fallMat(11, 2.2)); bellMesh.position.set(FX, 3.56, FZ); bellMesh.renderOrder = 2; group.add(bellMesh);
+    group.userData.bell = bellMesh;
+  }
   add(new THREE.CylinderGeometry(0.95, 1.0, 1.0, 18), STONE, -14.1, 0.5, 12.1); for (const sx of [-1, 1]) add(new THREE.CylinderGeometry(0.07, 0.07, 2.3, 8), WOOD, -14.1 + sx * 0.85, 1.15, 12.1); add(new THREE.ConeGeometry(1.35, 0.9, 4), ROOF, -14.1, 2.75, 12.1).rotation.y = Math.PI / 4;
   for (const [x, z, turn, col] of [[13, 14, 0, 0xe6b23a], [14.9, 2.5, Math.PI / 2, 0x4fa36a]]) {
     const st = new THREE.Group(); st.position.set(x, 0, z); st.rotation.y = turn; group.add(st);
@@ -289,7 +349,7 @@ export function buildCastle(scene, { spawn, sfx, addBox }) {
     colours() { let c; do c = pick(PALETTE); while (c === FLAG.color.getHex()); FLAG.color.setHex(c); for (const f of flags) { f.getWorldPosition(tw); for (let i = 0; i < 6; i++) spawn(tw.x, tw.y, tw.z, rnd(-1.5, 1.5), rnd(0.5, 2.5), rnd(-1.5, 1.5), rnd(0.8, 1.4), 0.22, { color: c, g: 1 }); } sfx.chime(5); },
     fountain() { ev.fount = 12; ev.hue = Math.random(); sfx.chime(2); },
   };
-  const here = new THREE.Vector3();
+  const here = new THREE.Vector3(), WHITE = new THREE.Color(0xffffff);
   function update(dt, time, px, pz, feet) {
     const dist = Math.hypot(px - CASTLE.x, pz - CASTLE.z), lx = px - CASTLE.x, lz = pz - CASTLE.z;
     for (const [f, c, ph] of torches) { const k = 0.85 + 0.25 * Math.sin(time * 11 + ph) * Math.sin(time * 7.3 + ph * 2); f.scale.set(1, k, 1); c.scale.set(1, 2 - k, 1); f.rotation.z = Math.sin(time * 5 + ph) * 0.12; }
@@ -331,8 +391,14 @@ export function buildCastle(scene, { spawn, sfx, addBox }) {
     }
     if (ev.bell > 0) { ev.bell -= dt; bell.rotation.x = Math.sin(time * 5.2) * 0.5 * Math.min(1, ev.bell / 2); const n = Math.floor((9 - ev.bell) / 1.1); if (n >= ev.bellN && ev.bell > 1.5) { ev.bellN = n + 1; sfx.chime([0, 4, 2, 5, 0, 4, 7][n % 7]); } } else bell.rotation.x *= 0.95;
     const fk = ev.fount > 0 ? Math.min(1, ev.fount / 1.5, (12 - ev.fount) / 1.5) : 0; if (ev.fount > 0) ev.fount -= dt;
-    jets.forEach((j, i) => { j.scale.y = (i ? 0.7 : 1.1) + Math.sin(time * 3 + i) * 0.12 + fk * (i ? 2.2 + Math.sin(time * 4 + i * 1.3) : 3.6); });
-    if (fk > 0) { WATER.color.setHSL((ev.hue + time * 0.08) % 1, 0.65, 0.68); if (Math.random() < dt * 22) spawn(CASTLE.x + rnd(-0.6, 0.6), Y0 + 5 + fk * 2, CASTLE.z + 10.1 + rnd(-0.6, 0.6), rnd(-1.6, 1.6), rnd(1, 3), rnd(-1.6, 1.6), 1, 0.16, { color: 0xbfe9ff, g: 7 }); } else WATER.color.setHex(0x7fd0f0);
+    WT.value = time; WPLAY.value = fk; { const b = group.userData.bell; b.scale.set(1 + fk * 0.9 + Math.sin(time * 2.1) * 0.04, 1 + fk * 2.4 + Math.sin(time * 3.3) * 0.06, 1 + fk * 0.9 + Math.sin(time * 2.1) * 0.04); }
+    if (dist < 70) {                                           // drops thrown up where each fall lands, and a mist off the top
+      const n = dt * (26 + fk * 60); for (let i = 0; i < n || Math.random() < n - Math.floor(n); i++) {
+        if (i > 6) break; const a = rnd(0, 6.283), top = Math.random() < 0.35, rr = top ? 0.64 : 1.52;
+        spawn(CASTLE.x + FX + Math.cos(a) * rr, Y0 + (top ? 2.3 : 0.56), CASTLE.z + FZ + Math.sin(a) * rr, Math.cos(a) * rnd(0.2, 0.9), rnd(0.8, 1.9), Math.sin(a) * rnd(0.2, 0.9), rnd(0.35, 0.6), rnd(0.05, 0.1), { color: 0xeaf7ff, g: 7, alpha: 0.75 });
+      }
+    }
+    if (fk > 0) { WTINT.value.setHSL((ev.hue + time * 0.08) % 1, 0.55, 0.78).lerp(WHITE, 1 - fk); if (Math.random() < dt * 30) spawn(CASTLE.x + FX + rnd(-0.3, 0.3), Y0 + 4.2 + fk * 1.6, CASTLE.z + FZ + rnd(-0.3, 0.3), rnd(-1.8, 1.8), rnd(1, 3.5), rnd(-1.8, 1.8), 1, 0.13, { color: 0xdff3ff, g: 7 }); } else WTINT.value.copy(WHITE);
   }
   return { groundAt, resolve, update, ballHit, solids: SOLIDS, state: () => ({ chestAt: ch.at, found: ch.found, targetAt: tg.at, last: ev.last, next: +ev.next.toFixed(1) }), fire: n => EVENTS[n] && EVENTS[n](), chestPos: () => CHEST_AT[ch.at] };
 }

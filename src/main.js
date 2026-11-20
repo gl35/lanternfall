@@ -728,9 +728,10 @@ const play = { swing: null, hammock: null, spots: [] };
 // A playground out in the valley: a roundabout, a seesaw, a slide, monkey bars and a sandpit.
 {
   const V = (x, y, z) => new THREE.Vector3(x, y, z), UP = new THREE.Vector3(0, 1, 0);
-  const paint = c => new THREE.MeshStandardMaterial({ color: c, roughness: 0.55 });
-  const RED = paint(0xe2503c), YEL = paint(0xf2c230), BLU = paint(0x3f8fd6), GRN = paint(0x55b86a), STEEL = new THREE.MeshStandardMaterial({ color: 0xb9c0c8, roughness: 0.35, metalness: 0.6 });
+  const paint = (base, streak) => new THREE.MeshStandardMaterial({ map: grainTexture(base, streak), roughness: 0.8 });   // paint on wood: the grain shows through
+  const RED = paint('#d2705a', '#8f4332'), YEL = paint('#e6c877', '#a98a45'), BLU = paint('#8fb4cf', '#567c97'), GRN = paint('#93bf86', '#5d8551'), STEEL = MAT.wood;
   const bar = (a, b, r, mat) => { const d = b.clone().sub(a), m = new THREE.Mesh(new THREE.CylinderGeometry(r, r, d.length(), 10), mat); m.position.copy(a).addScaledVector(d, 0.5); m.quaternion.setFromUnitVectors(UP, d.normalize()); m.castShadow = true; return m; };
+  const knob = (p, r, mat) => { const m = new THREE.Mesh(sphereGeo, mat); m.scale.setScalar(r); m.position.copy(p); m.castShadow = true; return m; };
   const box = (w, h, d, mat, x, y, z) => { const m = new THREE.Mesh(new RoundedBoxGeometry(w, h, d, 3, Math.min(w, h, d) * 0.3), mat); m.position.set(x, y, z); m.castShadow = m.receiveShadow = true; return m; };
   {                                                            // soft sandy ground under it all, ringed with a low kerb of logs
     const pad = new THREE.Mesh(new THREE.CircleGeometry(PLAYGROUND.r, 48), new THREE.MeshStandardMaterial({ color: 0xe0cd9a, roughness: 1 }));
@@ -816,25 +817,52 @@ const play = { swing: null, hammock: null, spots: [] };
       put(k) { k.position.set(0.1, 0.13 - 0.84, -0.25); k.rotation.set(0, 0, 0); } };
   }
   {
-    const COLS = [0xe2503c, 0xf2c230, 0x3f8fd6, 0x55b86a, 0xe85a9a, 0xf08a3c];
+    const COLS = [0xe8806e, 0xf0cf6e, 0x8fc3e6, 0x9fd08c, 0xf0a3c0, 0xf2b07a, 0xc3a6e0, 0xf6efe0];   // the colours of the meadow flowers
+    play.deco = [];
+    // a balloon: fuller at the top, drawn in to a knot, skin that shines and lets a little light through
+    const balloonGeo = (() => { const p = []; for (let k = 0; k <= 22; k++) { const a = k / 22 * Math.PI; p.push(new THREE.Vector2(Math.max(0.001, 0.47 * Math.sin(a) * (1 - 0.2 * Math.cos(a))), -0.6 * Math.cos(a))); } return new THREE.LatheGeometry(p, 28); })();
+    const knotGeo = new THREE.ConeGeometry(0.05, 0.1, 8), stringMat = new THREE.MeshStandardMaterial({ color: 0xf3ead8, roughness: 1 });
+    const balloon = (x, y, z, col, len, lean, size = 1) => {             // tied at x,y,z; it floats `len` above on a string that bows a little
+      const pivot = new THREE.Group(); pivot.position.set(x, y, z); scene.add(pivot);
+      const mat = new THREE.MeshPhysicalMaterial({ color: col, roughness: 0.22, clearcoat: 1, clearcoatRoughness: 0.12, transparent: true, opacity: 0.93, emissive: col, emissiveIntensity: 0.16 });
+      const b = new THREE.Mesh(balloonGeo, mat); b.scale.setScalar(size); b.position.set(lean[0], len + 0.6 * size, lean[1]); b.castShadow = true;
+      const k = new THREE.Mesh(knotGeo, mat); k.position.set(lean[0], len - 0.03, lean[1]);
+      const curve = new THREE.CatmullRomCurve3([V(0, 0, 0), V(lean[0] * 0.2, len * 0.35, lean[1] * 0.2), V(lean[0] * 0.75, len * 0.75, lean[1] * 0.75), V(lean[0], len, lean[1])]);
+      const st = new THREE.Mesh(new THREE.TubeGeometry(curve, 10, 0.009, 4), stringMat);
+      pivot.add(b, k, st); play.deco.push({ kind: 'balloon', o: pivot, b, ph: Math.random() * 6.28, x, z });
+    };
+    // cloth for the pennants: a woven look and a stitched hem, tinted by each flag's own colour
+    const clothTex = (() => {
+      const c = document.createElement('canvas'); c.width = c.height = 128; const g = c.getContext('2d'); g.fillStyle = '#ffffff'; g.fillRect(0, 0, 128, 128);
+      for (let k = 0; k < 128; k += 3) { g.fillStyle = 'rgba(0,0,0,0.045)'; g.fillRect(k, 0, 1, 128); g.fillRect(0, k, 128, 1); }
+      g.fillStyle = 'rgba(0,0,0,0.10)'; g.fillRect(0, 0, 128, 9); g.fillStyle = 'rgba(255,255,255,0.5)'; for (let k = 4; k < 128; k += 10) g.fillRect(k, 4, 5, 1.5);
+      const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+    })();
+    const pennantGeo = (() => {                                // a long triangle, cut into strips so it can curl
+      const pos = [], uv = [], idx = [], N = 6, W = 0.62, H = 0.92;
+      for (let k = 0; k <= N; k++) { const t = k / N, hw = W / 2 * (1 - t); pos.push(-hw, -t * H, 0, hw, -t * H, 0); uv.push(0.5 - 0.5 * (1 - t), 1 - t, 0.5 + 0.5 * (1 - t), 1 - t); if (k < N) { const a = k * 2; idx.push(a, a + 2, a + 1, a + 1, a + 2, a + 3); } }
+      const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); g.setIndex(idx); g.computeVertexNormals(); return g;
+    })();
     const gateway = (t, wide, tall) => {
-      const a = valleyAt(t, -wide), b = valleyAt(t, wide), ya = hillHeight(a.x, a.z), yb = hillHeight(b.x, b.z);
-      scene.add(bar(V(a.x, ya, a.z), V(a.x, ya + tall, a.z), 0.12, MAT.wood), bar(V(b.x, yb, b.z), V(b.x, yb + tall, b.z), 0.12, MAT.wood));
-      const N = 15; for (let k = 0; k < N; k++) {
-        const u = (k + 0.5) / N, sag = Math.sin(u * Math.PI) * 1.1, x = a.x + (b.x - a.x) * u, z = a.z + (b.z - a.z) * u, y = ya + (yb - ya) * u + tall - sag;
-        const f = new THREE.Mesh(new THREE.ConeGeometry(0.34, 0.75, 3), new THREE.MeshStandardMaterial({ color: COLS[k % COLS.length], roughness: 0.8, side: THREE.DoubleSide }));
-        f.position.set(x, y - 0.38, z); f.rotation.set(Math.PI, yaw, 0); f.scale.z = 0.12; scene.add(f);
+      const a = valleyAt(t, -wide), b = valleyAt(t, wide), ya = hillHeight(a.x, a.z), yb = hillHeight(b.x, b.z), ry = Math.atan2(-(b.z - a.z), b.x - a.x);
+      for (const [p, y] of [[a, ya], [b, yb]]) {
+        scene.add(bar(V(p.x, y - 0.2, p.z), V(p.x, y + tall + 0.25, p.z), 0.13, MAT.wood), knob(V(p.x, y + tall + 0.25, p.z), 0.16, MAT.dark));
+        for (const h of [tall - 0.05, tall + 0.05]) scene.add(bar(V(p.x, y + h - 0.03, p.z), V(p.x, y + h + 0.03, p.z), 0.145, stringMat));       // the rope lashed round the post
       }
-      for (const p of [[a, ya], [b, yb]]) for (let k = 0; k < 3; k++) {                    // balloons tied to each post
-        const bl = new THREE.Mesh(sphereGeo, new THREE.MeshStandardMaterial({ color: COLS[(k * 2 + (p[0] === a ? 0 : 3)) % COLS.length], roughness: 0.3 }));
-        bl.scale.set(0.42, 0.52, 0.42); bl.position.set(p[0].x + (k - 1) * 0.5, p[1] + tall + 1.2 + k * 0.45, p[0].z + (k % 2) * 0.4); bl.castShadow = true; scene.add(bl);
-        scene.add(bar(V(p[0].x, p[1] + tall, p[0].z), bl.position.clone().add(V(0, -0.5, 0)), 0.012, STEEL));
+      const N = 13, sagAt = u => Math.sin(u * Math.PI) * 1.05, at3 = u => V(a.x + (b.x - a.x) * u, ya + (yb - ya) * u + tall - sagAt(u), a.z + (b.z - a.z) * u);
+      const rope = []; for (let k = 0; k <= 20; k++) rope.push(at3(k / 20));
+      scene.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(rope), 40, 0.022, 6), stringMat));
+      for (let k = 0; k < N; k++) {
+        const u = (k + 0.5) / N, p = at3(u), hang = new THREE.Group(); hang.position.copy(p); hang.rotation.y = ry; scene.add(hang);
+        const f = new THREE.Mesh(pennantGeo.clone(), new THREE.MeshStandardMaterial({ map: clothTex, color: COLS[(k * 3 + Math.round(t)) % COLS.length], roughness: 0.95, side: THREE.DoubleSide }));
+        f.castShadow = true; hang.add(f); play.deco.push({ kind: 'flag', o: hang, f, ph: k * 0.9 + t, x: p.x, z: p.z });
       }
+      for (const [p, y, sd] of [[a, ya, 0], [b, yb, 4]]) for (let k = 0; k < 3; k++) balloon(p.x, y + tall + 0.2, p.z, COLS[(k * 2 + sd) % COLS.length], 1.3 + k * 0.5, [(k - 1) * 0.45, (k % 2) * 0.35 - 0.1], 0.9);
     };
     gateway(41, 5.5, 5.2); gateway(53, 7, 4.2);
-    const c = at(0, 0);                                         // a big bunch high over the middle of the playground, seen from across the meadow
-    scene.add(bar(V(c.x, 0, c.z), V(c.x, 7.5, c.z), 0.07, STEEL));
-    for (let k = 0; k < 9; k++) { const a = k * 2.4, r = 0.5 + (k % 3) * 0.35, bl = new THREE.Mesh(sphereGeo, new THREE.MeshStandardMaterial({ color: COLS[k % COLS.length], roughness: 0.3 })); bl.scale.set(0.6, 0.74, 0.6); bl.position.set(c.x + Math.cos(a) * r, 8.4 + (k % 4) * 0.55, c.z + Math.sin(a) * r); scene.add(bl); }
+    const c = at(0, 0);                                         // a big bunch on a tall pole over the middle of the playground, seen from across the meadow
+    scene.add(bar(V(c.x, 0, c.z), V(c.x, 6.6, c.z), 0.1, MAT.wood), knob(V(c.x, 6.6, c.z), 0.14, MAT.dark));
+    for (let k = 0; k < 9; k++) { const an = k * 2.4, r = 0.35 + (k % 3) * 0.42; balloon(c.x, 6.6, c.z, COLS[k % COLS.length], 1.5 + (k % 4) * 0.55, [Math.cos(an) * r, Math.sin(an) * r], 1.15); }
     play.spots.push({ x: c.x, z: c.z, r: 0.5 });
   }
   play.field = at(0, 0);
@@ -845,6 +873,14 @@ function updatePlay(dt) {
     const rd = play.round, ss = play.seesaw, sl = play.slide;
     rd.speed += (rd.want - rd.speed) * Math.min(1, dt * 0.8); rd.seat.rotation.y -= rd.speed * dt;
     ss.amp += (ss.want - ss.amp) * Math.min(1, dt * 0.9); ss.seat.rotation.z = Math.sin(time * 1.7) * ss.amp;
+    for (const d of play.deco) {
+      const gust = Math.sin(d.x * 0.21 + d.z * 0.12 - time * 1.5 + Math.sin(d.z * 0.08 + time * 0.25) * 2.2) * 0.5 + 0.5, g2 = gust * gust;
+      if (d.kind === 'balloon') { d.o.rotation.z = -0.06 - g2 * 0.26 + Math.sin(time * 1.7 + d.ph) * 0.05; d.o.rotation.x = Math.sin(time * 1.3 + d.ph * 1.7) * 0.07 + g2 * 0.08; d.b.rotation.y = Math.sin(time * 0.6 + d.ph) * 0.5; }
+      else {
+        d.o.rotation.x = 0.08 + g2 * 0.75 + Math.sin(time * 4.6 + d.ph) * 0.1 * (0.4 + gust);
+        const p = d.f.geometry.attributes.position; for (let k = 0; k < p.count; k++) { const t = -p.getY(k) / 0.92; p.setZ(k, Math.sin(t * 4.2 - time * 7 + d.ph) * 0.07 * t * (0.5 + gust)); } p.needsUpdate = true;
+      }
+    }
     const mb = play.bars, sd = play.sand;
     if (mb.rider) {                                          // along the rungs and back to the middle of the far end, body swinging under her hands
       mb.tt += dt; const p = Math.min(1, mb.tt / 5.4), reach = Math.sin(mb.tt * 5.2);
