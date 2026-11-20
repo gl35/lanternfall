@@ -69,12 +69,15 @@ export function valleyAt(t, side = 0) {                     // the point t along
   const off = side - VALLEY.wind * Math.sin(t * VALLEY.k);
   return { x: VALLEY.ux * t - VALLEY.uz * off, z: VALLEY.uz * t + VALLEY.ux * off };
 }
+export const CASTLE = { x: 0, z: -112, y: 9, flat: 46, edge: 70 };   // a levelled hilltop beyond the far side of the meadow
+const castleMask = (x, z) => 1 - sstep(CASTLE.flat, CASTLE.edge, Math.hypot(x - CASTLE.x, z - CASTLE.z));
 export const PLAYGROUND = { ...valleyAt(62), r: 12.5 };       // a round of bare ground in the valley: no grass grows on it
 export function hillHeight(x, z) {
   const d = Math.hypot(x, z);
   const roll = 0.5 + 0.5 * Math.sin(x * 0.031 + 1.3) * Math.sin(z * 0.027 + 0.7), wave = 0.5 + 0.5 * Math.sin(x * 0.011 - z * 0.017 + 2.0);
   const peaks = 0.5 + 0.5 * Math.sin(x * 0.0085 + 0.5) * Math.cos(z * 0.0075 - 1.0), ridge = 0.5 + 0.5 * Math.sin(Math.atan2(z, x) * 7 + 1.0);
-  return sstep(HILL_IN, HILL_OUT, d) * (5 + 16 * roll + 9 * wave) * (1 - valley(x, z)) + sstep(190, 430, d) * (26 + 60 * peaks + 26 * ridge);
+  const cm = castleMask(x, z);
+  return sstep(HILL_IN, HILL_OUT, d) * (5 + 16 * roll + 9 * wave) * (1 - valley(x, z)) * (1 - cm) + CASTLE.y * cm + sstep(190, 430, d) * (26 + 60 * peaks + 26 * ridge);
 }
 const HILL_GLSL = `float hillH(vec2 p) {
     float d = length(p);
@@ -82,7 +85,8 @@ const HILL_GLSL = `float hillH(vec2 p) {
     float vt = p.x * ${VALLEY.ux.toFixed(3)} + p.y * ${VALLEY.uz.toFixed(3)};
     float vs = -p.x * ${VALLEY.uz.toFixed(3)} + p.y * ${VALLEY.ux.toFixed(3)} + ${VALLEY.wind.toFixed(1)} * sin(vt * ${VALLEY.k.toFixed(3)});
     float vale = step(0.0, vt) * (1.0 - smoothstep(${VALLEY.flat.toFixed(1)}, ${VALLEY.wall.toFixed(1)}, abs(vs))) * (1.0 - smoothstep(${VALLEY.end0.toFixed(1)}, ${VALLEY.end1.toFixed(1)}, vt));
-    return smoothstep(${HILL_IN.toFixed(1)}, ${HILL_OUT.toFixed(1)}, d) * (5.0 + 16.0 * roll + 9.0 * wave) * (1.0 - vale);
+    float cm = 1.0 - smoothstep(${CASTLE.flat.toFixed(1)}, ${CASTLE.edge.toFixed(1)}, distance(p, vec2(${CASTLE.x.toFixed(1)}, ${CASTLE.z.toFixed(1)})));
+    return smoothstep(${HILL_IN.toFixed(1)}, ${HILL_OUT.toFixed(1)}, d) * (5.0 + 16.0 * roll + 9.0 * wave) * (1.0 - vale) * (1.0 - cm) + ${CASTLE.y.toFixed(1)} * cm;
   }`;
 
 function hills() {
@@ -157,6 +161,7 @@ function hillWoods(r, U, bareGeo) {
     if (i % 9 === 0) { const a = r() * 6.283, rad = 105 + Math.pow(r(), 1.3) * 230; cx = Math.cos(a) * rad; cz = Math.sin(a) * rad; }   // copses
     let x = cx + (r() - 0.5) * 30, z = cz + (r() - 0.5) * 30; const sc = 2.2 + r() * 2.6;
     if (valley(x, z) > 0.05) { x -= VALLEY.uz * 46; z += VALLEY.ux * 46; }   // moved up onto the side of it
+    { const cd = Math.hypot(x - CASTLE.x, z - CASTLE.z); if (cd < CASTLE.flat + 6) { const k = (CASTLE.flat + 8 + (cd % 7)) / Math.max(cd, 1); x = CASTLE.x + (x - CASTLE.x) * k; z = CASTLE.z + (z - CASTLE.z) * k; } }   // and off the castle's hilltop
     const ground = hillHeight(x, z), M = sc * 0.42, tpl = i % T;
     const yaw = yaws[tpl], cy = Math.cos(yaw), sy = Math.sin(yaw);
     WOODS.push({ x, z, r: sc * 0.5, i, y: ground, m: M, tpl, slot: null, d: 0, want: false });
@@ -417,6 +422,7 @@ function grassField(r, U, o) {
         float ramp = smoothstep(${f(o.range[0])}, ${f(o.range[1])}, dC);
         float keep = ${o.mode === 'near' ? 'clamp((1.0 - ramp - hsh) * 5.0, 0.0, 1.0)' : `clamp((ramp - hsh) * 5.0, 0.0, 1.0) * (1.0 - smoothstep(${f(o.fadeOut[0])}, ${f(o.fadeOut[1])}, dC))`} * step(length(wp), ${f(ROAM + 30)});
         ground = hillH(wp);
+        keep *= 1.0 - step(abs(wp.x - ${f(CASTLE.x)}), 26.3) * step(abs(wp.y - ${f(CASTLE.z)}), 26.3);
         keep *= smoothstep(${f(PLAYGROUND.r - 1.2)}, ${f(PLAYGROUND.r + 0.8)}, distance(wp, vec2(${f(PLAYGROUND.x)}, ${f(PLAYGROUND.z)})));
         keep *= mix(1.0, step(fract(hsh * 7.31), 0.05), uSnow);                       // winter: only a few dry stalks show through the snow
         float gust = sin(wp.x * 0.21 + wp.y * 0.12 - uTime * 1.5 + sin(wp.y * 0.08 + uTime * 0.25) * 2.2) * 0.5 + 0.5;

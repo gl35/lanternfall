@@ -4,7 +4,8 @@ import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeom
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
-import { buildScenery, softTexture, R, START, TREES, WOODS, ROAM, hillHeight, VALLEY, valleyAt, PLAYGROUND } from './scenery.js';
+import { buildScenery, softTexture, R, START, TREES, WOODS, ROAM, hillHeight, VALLEY, valleyAt, PLAYGROUND, CASTLE } from './scenery.js';
+import { buildCastle } from './castle.js';
 import { sfx } from './audio.js';
 
 // ---------- renderer / scene ----------
@@ -325,8 +326,9 @@ function stand2Struck() {}
 // Steering the kid, he can walk her onto the swing or into the hammock; pushing the stick again (or a jump) gets her off.
 function playerMount(kind) {
   const e = play[kind];
-  player.ride = kind; player.rideFree = false; player.x = e.x; player.z = e.z; player.moving = 0;
+  player.ride = kind; player.rideFree = false; player.moving = 0;
   hero.visible = false; kid.group.visible = true; kidMount(kind); sfx.chime(4);
+  player.x = e.x; player.z = e.z;
 }
 function playerDismount() {
   if (!player.ride) return;
@@ -600,6 +602,11 @@ function fireflies(x, y, z, n, flash = true) {
   for (let i = 0; i < n; i++) spawn(x, y, z, rnd(2.2), 1.5 + Math.random() * 3, rnd(2.2), 1.6 + Math.random() * 1.4, 0.28 + Math.random() * 0.25,
     { color: 0xffc66a, g: 1.2, wob: 3 + Math.random() * 4 });
 }
+const castle = buildCastle(scene, { spawn, sfx, addBox: (x, y, z, hx, hy, hz) => addStatic(new CANNON.Box(new CANNON.Vec3(hx, Math.max(0.05, hy), hz)), x, y, z) });
+{                                                            // a paved yard inside the walls
+  const yard = new THREE.Mesh(new THREE.PlaneGeometry(52.4, 52.4), new THREE.MeshStandardMaterial({ color: 0xb9ae98, roughness: 1 }));
+  yard.rotation.x = -Math.PI / 2; yard.position.set(CASTLE.x, CASTLE.y + 0.04, CASTLE.z); yard.receiveShadow = true; scene.add(yard);
+}
 function updateParts(dt, t) {
   for (const p of parts) {
     if (p.life <= 0) continue;
@@ -764,9 +771,9 @@ const play = { swing: null, hammock: null, spots: [] };
     for (const sx of [-1, 1]) pivot.add(box(0.5, 0.05, 0.4, YEL, sx * 1.95, 0.11, 0), bar(V(sx * 1.55, 0.08, 0), V(sx * 1.55, 0.42, 0), 0.025, STEEL), bar(V(sx * 1.55, 0.42, -0.17), V(sx * 1.55, 0.42, 0.17), 0.025, RED));
     g.updateMatrixWorld(true);
     const end = world(g, 1.95, 0), c = { x: g.position.x, z: g.position.z };
-    play.seesaw = { x: end.x, z: end.z, g, r: 0.75, seat: pivot, amp: 0.03, want: 0.03, idle: 0.03, busy: 0.27, rider: false, pose: KID_POSE.hold, sit: 'astride', exit: world(g, 2.2, 1.6),
-      put(k) { k.position.set(1.95, 0.13 - 0.93, 0); k.rotation.set(0, -Math.PI / 2, 0); } };
-    play.spots.push({ x: c.x, z: c.z, r: 0.6 });
+    play.seesaw = { x: end.x, z: end.z, g, r: 0.9, seat: pivot, amp: 0.03, want: 0.03, idle: 0.03, busy: 0.27, rider: false, pose: KID_POSE.hold, sit: 'astride', exit: world(g, 2.2, 1.6), side: 1,
+      dist(px, pz) { const p = g.worldToLocal(V(px, 0, pz)); this.near = p.x < 0 ? -1 : 1; return Math.hypot(Math.max(0, Math.abs(p.x) - 2.3), p.z); },   // how far he is from the plank
+      put(k) { const sd = this.side = this.near || 1; this.near = 0; k.position.set(sd * 1.95, 0.13 - 0.93, 0); k.rotation.set(0, -sd * Math.PI / 2, 0); this.exit = world(g, sd * 2.2, 1.6); const e = world(g, sd * 1.95, 0); this.x = e.x; this.z = e.z; } };
   }
   // the slide: a ladder up to a deck, and a chute down the other side
   {
@@ -1047,6 +1054,7 @@ function physics(dt) {
         p.y = gh + BALL_R; if (v.y < 0) { if (v.y < -4) dust(p.x, gh + 0.1, p.z, 2); v.y *= -0.35; } v.x *= 0.9; v.z *= 0.9;
       }
       for (const t of TREES) ballTree(o, t.x, t.z, 0, t.s * 1.5);
+      castle.ballHit(p);
       if (!kid.away) ballBody(o, kid.x, kid.z, kid.ride ? 0.8 : 0.5, kid.ride ? 2.9 : 1.9, kidStruck); for (const st of [stand, stand2]) if (st.on) ballBody(o, st.x, st.z, 0.6, 2.3, st === stand ? standStruck : stand2Struck); if (!npc.away) ballBody(o, npc.x, npc.z, 1.5, 4.3, npcStruck);
       if (Math.hypot(p.x, p.z) > R) for (const t of WOODS) ballTree(o, t.x, t.z, t.y, t.m);
       for (const b of beacons) if (!b.lit && Math.hypot(p.x - b.x, p.z - b.z) < 1.9 && p.y > b.h - 0.5 && p.y < b.h + 8) { lightBeacon(b); o.age = 99; }
@@ -1069,7 +1077,7 @@ const elBeacons = document.getElementById('beacons');
 {
   const rng = mulberry(4242), N = 8;
   const pillarGeo = new THREE.CylinderGeometry(0.55, 0.9, 4.4, 14), bowlGeo = new THREE.CylinderGeometry(1.25, 0.6, 0.8, 20), footGeo = new THREE.CylinderGeometry(1.3, 1.5, 0.5, 16);
-  const clear = (x, z, pad) => !WOODS.some(t => Math.hypot(t.x - x, t.z - z) < t.r * 2.2 + pad);
+  const clear = (x, z, pad) => !WOODS.some(t => Math.hypot(t.x - x, t.z - z) < t.r * 2.2 + pad) && Math.hypot(x - CASTLE.x, z - CASTLE.z) > 42;   // and not inside the castle
   for (let i = 0; i < N; i++) {
     let best = null;
     for (let k = 0; k < 80; k++) {                           // the highest clear spot in this beacon's slice of the hills
@@ -1193,13 +1201,19 @@ function movePlayer(dt) {
   TREES.forEach((t, i) => push(t.x, t.z, player.flying && scenery.isBare(i) ? 0.45 * t.s + 0.35 : 0.7 * t.s + 0.6));
   if (!npc.away) push(npc.x, npc.z, npc.r + (HERO.mount ? 1 : 0)); if (!kid.ride && !kid.away) push(kid.x, kid.z, 0.9); for (const st of [stand, stand2]) if (st.on) push(st.x, st.z, 1.1);
   if (heroIx === KID && player.y <= 0) for (const kind of RIDES) {
-    const e = play[kind], dd = Math.hypot(player.x - e.x, player.z - e.z), rad = e.r || (kind === 'swing' ? 1.7 : 1.5);
+    const e = play[kind], dd = e.dist ? e.dist(player.x, player.z) : Math.hypot(player.x - e.x, player.z - e.z), rad = e.r || (kind === 'swing' ? 1.7 : 1.5);
     if (player.rideLock === kind) { if (dd > rad + 1.4) player.rideLock = null; }
     else if (l > 0.12 && dd < rad + 0.3 && state === 'play' && !aim.on) { playerMount(kind); return; }
   }
   for (const q of play.spots) push(q.x, q.z, q.r);
   if (d > R) for (const t of WOODS) push(t.x, t.z, t.r);
-  player.g = hillHeight(player.x, player.z);
+  {
+    const feet = player.g + player.y;
+    castle.resolve(player, feet, HERO.mount ? 1.2 : 0.45);
+    const g2 = castle.groundAt(player.x, player.z, feet), drop = feet - g2;
+    player.y = player.y <= 0.001 && drop < 0.5 ? 0 : Math.max(0, drop);     // small steps and slopes are just walked; a real drop is a fall
+    player.g = g2;
+  }
   for (const o of objs) if (o.kind !== 'ball' && o.body.position.y < 2.4 + player.y && o.body.position.y > player.y - 0.5) push(o.body.position.x, o.body.position.z, 1.0);
 }
 
@@ -1241,6 +1255,7 @@ function step(dtReal) {
     if (npc.rear > 0) { npc.rear = Math.max(0, npc.rear - dt * 0.9); const k = Math.sin(npc.rear * Math.PI); npc.group.rotation.x = REAR * 0.38 * k; npc.group.position.y = (npc.gy || 0) + 0.5 * k; }
   }
   updatePlay(dt);
+  castle.update(dt, time, player.x, player.z, player.g + player.y);
   updateKid(dt, dtReal); for (const st of [stand, stand2]) if (st.mixer) st.mixer.update(dtReal);
   updateHills(dt);
   physics(dt);
@@ -1327,7 +1342,7 @@ function frame(now) {
 // Scripted stepping for tests (the preview pane only runs frames while visible).
 window.game = {
   step(seconds = 1, dt = 1 / 60) { window.__manual = true; for (let t = 0; t < seconds; t += dt) step(dt); renderer.render(scene, camera); return this.state(); },
-  fling, jump, setHero, swapHero, beacons, motes, lightBeacon, debug: { FLY_POSE, SIT_POSE, perches, scenery, WING, wings, WOODS, npc, kid, stand, stand2, play, KID_POSE, kidMount, kidDismount, scene, camera, hero, acts, THROW, THREE, player, sites, renderer, get mixer() { return mixer; } },
+  fling, jump, setHero, swapHero, beacons, motes, lightBeacon, debug: { castle, CASTLE, FLY_POSE, SIT_POSE, perches, scenery, WING, wings, WOODS, npc, kid, stand, stand2, play, KID_POSE, kidMount, kidDismount, scene, camera, hero, acts, THROW, THREE, player, sites, renderer, get mixer() { return mixer; } },
   walk(x, y) { window.__joy = x || y ? { x, y } : null; },
   setLevel(n) { level = n; buildLevel(); },
   setSeason(name) { scenery.setSeason(name); },
