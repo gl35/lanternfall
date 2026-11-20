@@ -4,7 +4,7 @@ import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeom
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
-import { buildScenery, softTexture, R, START, TREES, WOODS, ROAM, hillHeight, VALLEY, valleyAt, PLAYGROUND, CASTLE } from './scenery.js';
+import { buildScenery, softTexture, R, START, TREES, WOODS, ROAM, hillHeight, VALLEY, valleyAt, PLAYGROUND, CASTLE, BAY, valley2At } from './scenery.js';
 import { buildCastle } from './castle.js';
 import { sfx } from './audio.js';
 
@@ -602,7 +602,7 @@ function fireflies(x, y, z, n, flash = true) {
   for (let i = 0; i < n; i++) spawn(x, y, z, rnd(2.2), 1.5 + Math.random() * 3, rnd(2.2), 1.6 + Math.random() * 1.4, 0.28 + Math.random() * 0.25,
     { color: 0xffc66a, g: 1.2, wob: 3 + Math.random() * 4 });
 }
-const castle = buildCastle(scene, { spawn, sfx, addBox: (x, y, z, hx, hy, hz) => addStatic(new CANNON.Box(new CANNON.Vec3(hx, Math.max(0.05, hy), hz)), x, y, z) });
+const castle = buildCastle(scene, { spawn, sfx, ivy: pts => scenery.ivy(pts), addBox: (x, y, z, hx, hy, hz) => addStatic(new CANNON.Box(new CANNON.Vec3(hx, Math.max(0.05, hy), hz)), x, y, z) });
 function updateParts(dt, t) {
   for (const p of parts) {
     if (p.life <= 0) continue;
@@ -843,8 +843,8 @@ const play = { swing: null, hammock: null, spots: [] };
       for (let k = 0; k <= N; k++) { const t = k / N, hw = W / 2 * (1 - t); pos.push(-hw, -t * H, 0, hw, -t * H, 0); uv.push(0.5 - 0.5 * (1 - t), 1 - t, 0.5 + 0.5 * (1 - t), 1 - t); if (k < N) { const a = k * 2; idx.push(a, a + 2, a + 1, a + 1, a + 2, a + 3); } }
       const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); g.setIndex(idx); g.computeVertexNormals(); return g;
     })();
-    const gateway = (t, wide, tall) => {
-      const a = valleyAt(t, -wide), b = valleyAt(t, wide), ya = hillHeight(a.x, a.z), yb = hillHeight(b.x, b.z), ry = Math.atan2(-(b.z - a.z), b.x - a.x);
+    const gateway = (t, wide, tall, along = valleyAt) => {
+      const a = along(t, -wide), b = along(t, wide), ya = hillHeight(a.x, a.z), yb = hillHeight(b.x, b.z), ry = Math.atan2(-(b.z - a.z), b.x - a.x);
       for (const [p, y] of [[a, ya], [b, yb]]) {
         scene.add(bar(V(p.x, y - 0.2, p.z), V(p.x, y + tall + 0.25, p.z), 0.13, MAT.wood), knob(V(p.x, y + tall + 0.25, p.z), 0.16, MAT.dark));
         for (const h of [tall - 0.05, tall + 0.05]) scene.add(bar(V(p.x, y + h - 0.03, p.z), V(p.x, y + h + 0.03, p.z), 0.145, stringMat));       // the rope lashed round the post
@@ -860,6 +860,31 @@ const play = { swing: null, hammock: null, spots: [] };
       for (const [p, y, sd] of [[a, ya, 0], [b, yb, 4]]) for (let k = 0; k < 3; k++) balloon(p.x, y + tall + 0.2, p.z, COLS[(k * 2 + sd) % COLS.length], 1.3 + k * 0.5, [(k - 1) * 0.45, (k % 2) * 0.35 - 0.1], 0.9);
     };
     gateway(41, 5.5, 5.2); gateway(53, 7, 4.2);
+    gateway(43, 5.5, 5.2, valley2At);
+    // on the beach: a rowing boat riding the swell, driftwood, smooth stones, a striped windbreak and a sandcastle
+    {
+      const ang = a => ({ x: BAY.x + Math.cos(a), z: BAY.z + Math.sin(a) }), on = (a, r) => { const p = { x: BAY.x + Math.cos(a) * r, z: BAY.z + Math.sin(a) * r }; return V(p.x, hillHeight(p.x, p.z), p.z); };
+      const toMeadow = Math.atan2(-BAY.z, -BAY.x);              // the side of the cove he arrives on
+      const boat = new THREE.Group(), hull = new THREE.Mesh(new THREE.SphereGeometry(1, 20, 12, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2), MAT.dark);
+      hull.scale.set(0.85, 0.55, 2.1); hull.castShadow = true; boat.add(hull);
+      const rim = new THREE.Mesh(new THREE.TorusGeometry(1, 0.06, 6, 28), MAT.wood); rim.rotation.x = Math.PI / 2; rim.scale.set(0.85, 2.1, 1); boat.add(rim);
+      for (const z of [-0.7, 0.5]) boat.add(box(1.5, 0.06, 0.32, MAT.wood, 0, -0.12, z));
+      for (const sx of [-1, 1]) { const oar = bar(V(sx * 0.8, -0.02, 0.1), V(sx * 2.3, -0.3, 0.5), 0.035, MAT.wood); boat.add(oar, box(0.1, 0.3, 0.5, MAT.wood, sx * 2.35, -0.32, 0.52)); }
+      const bp = on(toMeadow + 0.5, 25); boat.position.set(bp.x, BAY.level + 0.12, bp.z); boat.rotation.y = 0.8; scene.add(boat);
+      play.deco.push({ kind: 'boat', o: boat, ph: 1.3, x: bp.x, z: bp.z });
+      for (const [da, r, len, turn] of [[0.25, 36.5, 3.2, 0.4], [-0.35, 37.5, 2.2, 1.9], [0.9, 36, 2.6, 2.6]]) {
+        const p = on(toMeadow + da, r), a = turn, log = bar(V(p.x - Math.cos(a) * len / 2, p.y + 0.16, p.z - Math.sin(a) * len / 2), V(p.x + Math.cos(a) * len / 2, p.y + 0.2, p.z + Math.sin(a) * len / 2), 0.17, MAT.wood); scene.add(log);
+        play.spots.push({ x: p.x, z: p.z, r: 0.7 });
+      }
+      for (let k = 0; k < 16; k++) { const p = on(toMeadow + (k * 0.618 % 1 - 0.5) * 2.6, 33 + (k * 0.37 % 1) * 6), st = new THREE.Mesh(sphereGeo, MAT.stone); const sz = 0.16 + (k * 0.29 % 1) * 0.3; st.scale.set(sz * 1.4, sz * 0.6, sz); st.position.set(p.x, p.y + sz * 0.2, p.z); st.rotation.y = k; st.castShadow = true; scene.add(st); }
+      // a windbreak: striped cloth between three poles
+      { const p0 = on(toMeadow - 0.12, 38.2), p1 = on(toMeadow + 0.02, 38.6), p2 = on(toMeadow + 0.14, 38);
+        for (const p of [p0, p1, p2]) scene.add(bar(V(p.x, p.y - 0.1, p.z), V(p.x, p.y + 1.5, p.z), 0.05, MAT.wood));
+        for (const [a, b] of [[p0, p1], [p1, p2]]) for (let k = 0; k < 6; k++) { const m = new THREE.Mesh(new THREE.PlaneGeometry(a.distanceTo(b), 0.2), new THREE.MeshStandardMaterial({ map: clothTex, color: k % 2 ? 0xf6efe0 : COLS[0], side: THREE.DoubleSide, roughness: 0.95 })); m.position.set((a.x + b.x) / 2, a.y + 0.25 + k * 0.2, (a.z + b.z) / 2); m.rotation.y = Math.atan2(-(b.z - a.z), b.x - a.x); m.castShadow = true; scene.add(m); } }
+      // somebody's sandcastle
+      { const p = on(toMeadow + 0.42, 36.8), SAND2 = new THREE.MeshStandardMaterial({ color: 0xe6cf96, roughness: 1 });
+        for (const [dx, dz, r, h] of [[0, 0, 0.42, 0.5], [-0.5, -0.4, 0.17, 0.42], [0.5, -0.4, 0.17, 0.42], [-0.5, 0.4, 0.17, 0.42], [0.5, 0.4, 0.17, 0.42]]) { const m = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.72, r, h, 14), SAND2); m.position.set(p.x + dx, p.y + h / 2, p.z + dz); m.castShadow = true; scene.add(m); } }
+    }
     const c = at(0, 0);                                         // a big bunch on a tall pole over the middle of the playground, seen from across the meadow
     scene.add(bar(V(c.x, 0, c.z), V(c.x, 6.6, c.z), 0.1, MAT.wood), knob(V(c.x, 6.6, c.z), 0.14, MAT.dark));
     for (let k = 0; k < 9; k++) { const an = k * 2.4, r = 0.35 + (k % 3) * 0.42; balloon(c.x, 6.6, c.z, COLS[k % COLS.length], 1.5 + (k % 4) * 0.55, [Math.cos(an) * r, Math.sin(an) * r], 1.15); }
@@ -875,6 +900,7 @@ function updatePlay(dt) {
     ss.amp += (ss.want - ss.amp) * Math.min(1, dt * 0.9); ss.seat.rotation.z = Math.sin(time * 1.7) * ss.amp;
     for (const d of play.deco) {
       const wt = scenery.windTime, ws = scenery.wind, gust = (Math.sin(d.x * 0.21 + d.z * 0.12 - wt * 1.5 + Math.sin(d.z * 0.08 + wt * 0.25) * 2.2) * 0.5 + 0.5) * (0.15 + 0.85 * ws), g2 = gust * gust;
+      if (d.kind === 'boat') { d.o.position.y = BAY.level + 0.12 + Math.sin(wt * 1.5 + d.ph) * 0.07 * (0.6 + ws); d.o.rotation.z = Math.sin(wt * 1.3 + d.ph) * 0.07 * (0.5 + ws); d.o.rotation.x = Math.sin(wt * 1.7) * 0.04 * (0.5 + ws); continue; }
       if (d.kind === 'balloon') { d.o.rotation.z = -0.03 - Math.min(0.75, g2 * 0.3) + Math.sin(wt * 1.7 + d.ph) * 0.05; d.o.rotation.x = Math.sin(wt * 1.3 + d.ph * 1.7) * 0.07 + g2 * 0.08; d.b.rotation.y = Math.sin(wt * 0.6 + d.ph) * 0.5; }
       else {
         d.o.rotation.x = 0.04 + Math.min(1.2, g2 * 0.8) + Math.sin(wt * 4.6 + d.ph) * 0.1 * (0.2 + gust);
@@ -1149,7 +1175,7 @@ const elBeacons = document.getElementById('beacons');
 {
   const rng = mulberry(4242), N = 8;
   const pillarGeo = new THREE.CylinderGeometry(0.55, 0.9, 4.4, 14), bowlGeo = new THREE.CylinderGeometry(1.25, 0.6, 0.8, 20), footGeo = new THREE.CylinderGeometry(1.3, 1.5, 0.5, 16);
-  const clear = (x, z, pad) => !WOODS.some(t => Math.hypot(t.x - x, t.z - z) < t.r * 2.2 + pad) && Math.hypot(x - CASTLE.x, z - CASTLE.z) > 42;   // and not inside the castle
+  const clear = (x, z, pad) => !WOODS.some(t => Math.hypot(t.x - x, t.z - z) < t.r * 2.2 + pad) && Math.hypot(x - CASTLE.x, z - CASTLE.z) > 42 && Math.hypot(x - BAY.x, z - BAY.z) > BAY.edge;   // and not inside the castle or in the cove
   for (let i = 0; i < N; i++) {
     let best = null;
     for (let k = 0; k < 80; k++) {                           // the highest clear spot in this beacon's slice of the hills
@@ -1284,7 +1310,7 @@ function movePlayer(dt) {
     castle.resolve(player, feet, HERO.mount ? 1.2 : 0.45);
     const g2 = castle.groundAt(player.x, player.z, feet), drop = feet - g2;
     player.y = player.y <= 0.001 && drop < 0.5 ? 0 : Math.max(0, drop);     // small steps and slopes are just walked; a real drop is a fall
-    player.g = g2;
+    player.g = Math.hypot(player.x - BAY.x, player.z - BAY.z) < BAY.r ? Math.max(g2, BAY.level - 0.85) : g2;   // in the cove he wades, waist deep at most
   }
   for (const o of objs) if (o.kind !== 'ball' && o.body.position.y < 2.4 + player.y && o.body.position.y > player.y - 0.5) push(o.body.position.x, o.body.position.z, 1.0);
 }

@@ -69,6 +69,20 @@ export function valleyAt(t, side = 0) {                     // the point t along
   const off = side - VALLEY.wind * Math.sin(t * VALLEY.k);
   return { x: VALLEY.ux * t - VALLEY.uz * off, z: VALLEY.uz * t + VALLEY.ux * off };
 }
+export const VALLEY2 = { ux: 0.985, uz: -0.17, wind: 6, k: 0.05, flat: 13, wall: 36, end0: 120, end1: 150 };   // east from the meadow, down to the sea
+export function valley2(x, z) {
+  const V = VALLEY2, t = x * V.ux + z * V.uz; if (t <= 0) return 0;
+  const side = -x * V.uz + z * V.ux + V.wind * Math.sin(t * V.k);
+  return (1 - sstep(V.flat, V.wall, Math.abs(side))) * (1 - sstep(V.end0, V.end1, t));
+}
+export function valley2At(t, side = 0) {
+  const V = VALLEY2, off = side - V.wind * Math.sin(t * V.k);
+  return { x: V.ux * t - V.uz * off, z: V.uz * t + V.ux * off };
+}
+// The cove at the end of it: the ground dips below the water in the middle and comes up through a strip of sand.
+export const BAY = { ...valley2At(138), r: 40, edge: 62, level: -0.35, deep: -3.2, shore: 32.3 };
+const bayMask = (x, z) => 1 - sstep(BAY.r, BAY.edge, Math.hypot(x - BAY.x, z - BAY.z));
+const bayFloor = r => BAY.deep + 3.5 * sstep(14, BAY.r, r);
 export const CASTLE = { x: 0, z: -112, y: 9, flat: 46, edge: 70 };   // a levelled hilltop beyond the far side of the meadow
 const castleMask = (x, z) => 1 - sstep(CASTLE.flat, CASTLE.edge, Math.hypot(x - CASTLE.x, z - CASTLE.z));
 export const PLAYGROUND = { ...valleyAt(62), r: 12.5 };       // a round of bare ground in the valley: no grass grows on it
@@ -76,8 +90,10 @@ export function hillHeight(x, z) {
   const d = Math.hypot(x, z);
   const roll = 0.5 + 0.5 * Math.sin(x * 0.031 + 1.3) * Math.sin(z * 0.027 + 0.7), wave = 0.5 + 0.5 * Math.sin(x * 0.011 - z * 0.017 + 2.0);
   const peaks = 0.5 + 0.5 * Math.sin(x * 0.0085 + 0.5) * Math.cos(z * 0.0075 - 1.0), ridge = 0.5 + 0.5 * Math.sin(Math.atan2(z, x) * 7 + 1.0);
-  const cm = castleMask(x, z);
-  return sstep(HILL_IN, HILL_OUT, d) * (5 + 16 * roll + 9 * wave) * (1 - valley(x, z)) * (1 - cm) + CASTLE.y * cm + sstep(190, 430, d) * (26 + 60 * peaks + 26 * ridge);
+  const cm = castleMask(x, z), bm = bayMask(x, z);
+  let h = sstep(HILL_IN, HILL_OUT, d) * (5 + 16 * roll + 9 * wave) * (1 - Math.max(valley(x, z), valley2(x, z))) * (1 - cm) + CASTLE.y * cm;
+  if (bm > 0) h = h * (1 - bm) + bayFloor(Math.hypot(x - BAY.x, z - BAY.z)) * bm;
+  return h + sstep(190, 430, d) * (26 + 60 * peaks + 26 * ridge);
 }
 const HILL_GLSL = `float hillH(vec2 p) {
     float d = length(p);
@@ -86,19 +102,82 @@ const HILL_GLSL = `float hillH(vec2 p) {
     float vs = -p.x * ${VALLEY.uz.toFixed(3)} + p.y * ${VALLEY.ux.toFixed(3)} + ${VALLEY.wind.toFixed(1)} * sin(vt * ${VALLEY.k.toFixed(3)});
     float vale = step(0.0, vt) * (1.0 - smoothstep(${VALLEY.flat.toFixed(1)}, ${VALLEY.wall.toFixed(1)}, abs(vs))) * (1.0 - smoothstep(${VALLEY.end0.toFixed(1)}, ${VALLEY.end1.toFixed(1)}, vt));
     float cm = 1.0 - smoothstep(${CASTLE.flat.toFixed(1)}, ${CASTLE.edge.toFixed(1)}, distance(p, vec2(${CASTLE.x.toFixed(1)}, ${CASTLE.z.toFixed(1)})));
-    return smoothstep(${HILL_IN.toFixed(1)}, ${HILL_OUT.toFixed(1)}, d) * (5.0 + 16.0 * roll + 9.0 * wave) * (1.0 - vale) * (1.0 - cm) + ${CASTLE.y.toFixed(1)} * cm;
+    float wt = p.x * ${VALLEY2.ux.toFixed(3)} + p.y * ${VALLEY2.uz.toFixed(3)};
+    float ws = -p.x * ${VALLEY2.uz.toFixed(3)} + p.y * ${VALLEY2.ux.toFixed(3)} + ${VALLEY2.wind.toFixed(1)} * sin(wt * ${VALLEY2.k.toFixed(3)});
+    float vale2 = step(0.0, wt) * (1.0 - smoothstep(${VALLEY2.flat.toFixed(1)}, ${VALLEY2.wall.toFixed(1)}, abs(ws))) * (1.0 - smoothstep(${VALLEY2.end0.toFixed(1)}, ${VALLEY2.end1.toFixed(1)}, wt));
+    float bd = distance(p, vec2(${BAY.x.toFixed(2)}, ${BAY.z.toFixed(2)})), bm = 1.0 - smoothstep(${BAY.r.toFixed(1)}, ${BAY.edge.toFixed(1)}, bd);
+    float h = smoothstep(${HILL_IN.toFixed(1)}, ${HILL_OUT.toFixed(1)}, d) * (5.0 + 16.0 * roll + 9.0 * wave) * (1.0 - max(vale, vale2)) * (1.0 - cm) + ${CASTLE.y.toFixed(1)} * cm;
+    return mix(h, ${BAY.deep.toFixed(1)} + 3.5 * smoothstep(14.0, ${BAY.r.toFixed(1)}, bd), bm);
   }`;
 
+const LAND = { meadow: new THREE.Color(0x48a838), sunny: new THREE.Color(0x86cf48), wood: new THREE.Color(0x2c8040), high: new THREE.Color(0x4f9a78), sand: new THREE.Color(0xf0dca6), wet: new THREE.Color(0xc9ad76), bed: new THREE.Color(0x3f8f8a) };
+function landColor(c, x, z, y, d) {
+  const patch = 0.5 + 0.5 * Math.sin(x * 0.05 + Math.sin(z * 0.04) * 2) * Math.sin(z * 0.045 - x * 0.013);
+  return c.copy(LAND.meadow).lerp(LAND.sunny, patch * 0.55 * sstep(0, 12, y) + 0.08).lerp(LAND.wood, sstep(0.35, 0.75, 1 - patch) * sstep(4, 16, y) * 0.8).lerp(LAND.high, sstep(190, 400, d) * 0.85);
+}
+// The cove needs finer ground than the hills have: a close-meshed round of land, sand and sea bed laid just over them.
+function cove() {
+  const RINGS = 52, SEGS = 112, pos = [], col = [], idx = [], c = new THREE.Color();
+  for (let i = 0; i <= RINGS; i++) {
+    const r = BAY.edge * i / RINGS;
+    for (let j = 0; j <= SEGS; j++) {
+      const a = j / SEGS * Math.PI * 2, x = BAY.x + Math.cos(a) * r, z = BAY.z + Math.sin(a) * r, y = hillHeight(x, z);
+      pos.push(x, y + 0.03, z);
+      landColor(c, x, z, y, Math.hypot(x, z));
+      const ripple = Math.sin(r * 2.1 + Math.sin(a * 9) * 0.8) * 0.5 + 0.5;                       // faint ridges left in the sand by the water
+      const grassy = sstep(BAY.r - 1.2, BAY.r + 2.2, r + Math.sin(a * 13) * 0.9);
+      const sandC = LAND.sand.clone().lerp(LAND.wet, sstep(BAY.level + 0.5, BAY.level - 0.1, y) * 0.9 + ripple * 0.08).lerp(LAND.bed, sstep(BAY.level - 0.3, BAY.deep, y) * 0.85);
+      c.lerp(sandC, 1 - grassy); col.push(c.r, c.g, c.b);
+    }
+  }
+  for (let i = 0; i < RINGS; i++) for (let j = 0; j < SEGS; j++) { const a = i * (SEGS + 1) + j, b = a + SEGS + 1; idx.push(a, a + 1, b, a + 1, b + 1, b); }
+  const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3)); geo.setIndex(idx); geo.computeVertexNormals();
+  const mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ vertexColors: true })); mesh.receiveShadow = true; return mesh;
+}
+// Sea water in the cove: swell running in to the beach, lines of foam breaking along the shore, sun on the ripples, clear in the shallows.
+function seaWater(U) {
+  const mat = new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, uniforms: { uTime: U.time, uWind: U.wind, uShore: { value: BAY.shore }, uSun: { value: SUN_DIR } },
+    vertexShader: 'varying vec2 vP; varying vec3 vW; void main() { vP = position.xy; vec4 w = modelMatrix * vec4(position, 1.0); vW = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }',
+    fragmentShader: `uniform float uTime, uWind, uShore; uniform vec3 uSun; varying vec2 vP; varying vec3 vW;
+      float hgt(vec2 p) {
+        float r = length(p), a = atan(p.y, p.x), amp = 0.55 + 0.6 * uWind;
+        float swell = sin(r * 0.9 + uTime * 1.5 + sin(a * 3.0) * 0.9) * 0.6 + sin(r * 1.7 + uTime * 2.3 + a * 2.0) * 0.25;
+        float chop = sin(p.x * 2.3 + uTime * 1.9) * sin(p.y * 2.9 - uTime * 1.6) * 0.3 + sin((p.x - p.y) * 5.3 + uTime * 3.1) * 0.12;
+        return (swell + chop) * amp;
+      }
+      void main() {
+        float r = length(vP), a = atan(vP.y, vP.x);
+        float edge = uShore + sin(a * 7.0 + uTime * 0.9) * 0.5 + sin(uTime * 0.7 + a * 3.0) * 0.9;      // the waterline, washing in and out
+        if (r > edge + 0.6) discard;
+        float e = 0.08, h = hgt(vP), hx = hgt(vP + vec2(e, 0.0)) - h, hy = hgt(vP + vec2(0.0, e)) - h;
+        vec3 n = normalize(vec3(-hx / e * 0.16, 1.0, hy / e * 0.16)), V = normalize(cameraPosition - vW), L = normalize(uSun);
+        float depth = clamp((edge - r) / 16.0, 0.0, 1.0), fres = pow(1.0 - max(dot(n, V), 0.0), 3.0);
+        vec3 col = mix(vec3(0.42, 0.86, 0.80), vec3(0.04, 0.33, 0.50), pow(depth, 0.7));
+        col += h * 0.035;
+        col = mix(col, vec3(0.78, 0.90, 1.0), fres * 0.7);
+        float spec = pow(max(dot(reflect(-L, n), V), 0.0), 70.0);
+        float glit = pow(max(dot(reflect(-L, normalize(n + vec3(sin(vP.x * 23.0 + uTime * 2.4), 0.0, sin(vP.y * 19.0 - uTime * 2.1)) * 0.14)), V), 0.0), 200.0);
+        col += vec3(1.0, 0.96, 0.86) * (spec * 0.8 + glit * 1.5);
+        float near = 1.0 - clamp((edge - r) / 7.0, 0.0, 1.0);                                           // foam only close in
+        float lines = smoothstep(0.55, 0.95, sin((edge - r) * 1.5 + uTime * 1.6 + sin(a * 11.0) * 0.8)) * near;
+        float lace = smoothstep(0.9, 0.0, edge - r) * (0.75 + 0.25 * sin(a * 60.0 + uTime * 3.0));
+        col = mix(col, vec3(1.0), clamp(lines * 0.7 + lace, 0.0, 1.0));
+        float alpha = mix(0.5, 0.94, smoothstep(0.0, 0.35, depth)) * smoothstep(edge + 0.6, edge, r);
+        gl_FragColor = vec4(col, max(alpha, lace * 0.9));
+      }`,
+  });
+  const m = new THREE.Mesh(new THREE.CircleGeometry(BAY.shore + 3, 96), mat); m.rotation.x = -Math.PI / 2; m.position.set(BAY.x, BAY.level, BAY.z); m.renderOrder = 1; m.frustumCulled = false; return m;
+}
 function hills() {
   const RINGS = 56, SEGS = 180, OUT = 470, pos = [], col = [], idx = [];
-  const meadow = new THREE.Color(0x48a838), sunny = new THREE.Color(0x86cf48), wood = new THREE.Color(0x2c8040), high = new THREE.Color(0x4f9a78), c = new THREE.Color();
+  const c = new THREE.Color();
   for (let i = 0; i <= RINGS; i++) {
     const d = R * 0.985 + (OUT - R * 0.985) * Math.pow(i / RINGS, 1.7);
     for (let j = 0; j <= SEGS; j++) {
       const a = j / SEGS * Math.PI * 2, x = Math.cos(a) * d, z = Math.sin(a) * d, y = hillHeight(x, z);
-      pos.push(x, y + 0.006, z);
-      const patch = 0.5 + 0.5 * Math.sin(x * 0.05 + Math.sin(z * 0.04) * 2) * Math.sin(z * 0.045 - x * 0.013);
-      c.copy(meadow).lerp(sunny, patch * 0.55 * sstep(0, 12, y) + 0.08).lerp(wood, sstep(0.35, 0.75, 1 - patch) * sstep(4, 16, y) * 0.8).lerp(high, sstep(190, 400, d) * 0.85);
+      pos.push(x, y + 0.006 - 2.6 * bayMask(x, z) * sstep(BAY.edge, BAY.edge - 6, Math.hypot(x - BAY.x, z - BAY.z)), z);   // sunk out of sight where the cove's own ground lies over it
+      landColor(c, x, z, y, d);
       col.push(c.r, c.g, c.b);
     }
   }
@@ -161,6 +240,8 @@ function hillWoods(r, U, bareGeo) {
     if (i % 9 === 0) { const a = r() * 6.283, rad = 105 + Math.pow(r(), 1.3) * 230; cx = Math.cos(a) * rad; cz = Math.sin(a) * rad; }   // copses
     let x = cx + (r() - 0.5) * 30, z = cz + (r() - 0.5) * 30; const sc = 2.2 + r() * 2.6;
     if (valley(x, z) > 0.05) { x -= VALLEY.uz * 46; z += VALLEY.ux * 46; }   // moved up onto the side of it
+    if (valley2(x, z) > 0.05) { x -= VALLEY2.uz * 44; z += VALLEY2.ux * 44; }
+    { const bd = Math.hypot(x - BAY.x, z - BAY.z); if (bd < BAY.r + 8) { const k = (BAY.r + 10 + (bd % 9)) / Math.max(bd, 1); x = BAY.x + (x - BAY.x) * k; z = BAY.z + (z - BAY.z) * k; } }
     { const cd = Math.hypot(x - CASTLE.x, z - CASTLE.z); if (cd < CASTLE.flat + 6) { const k = (CASTLE.flat + 8 + (cd % 7)) / Math.max(cd, 1); x = CASTLE.x + (x - CASTLE.x) * k; z = CASTLE.z + (z - CASTLE.z) * k; } }   // and off the castle's hilltop
     const ground = hillHeight(x, z), M = sc * 0.42, tpl = i % T;
     const yaw = yaws[tpl], cy = Math.cos(yaw), sy = Math.sin(yaw);
@@ -442,6 +523,7 @@ function grassField(r, U, o) {
         float ramp = smoothstep(${f(o.range[0])}, ${f(o.range[1])}, dC);
         float keep = ${o.mode === 'near' ? 'clamp((1.0 - ramp - hsh) * 5.0, 0.0, 1.0)' : `clamp((ramp - hsh) * 5.0, 0.0, 1.0) * (1.0 - smoothstep(${f(o.fadeOut[0])}, ${f(o.fadeOut[1])}, dC))`} * step(length(wp), ${f(ROAM + 30)});
         ground = hillH(wp);
+        keep *= smoothstep(${f(BAY.r - 1.5)}, ${f(BAY.r + 2.5)}, distance(wp, vec2(${f(BAY.x)}, ${f(BAY.z)})));
         keep *= 1.0 - step(abs(wp.x - ${f(CASTLE.x)}), 26.3) * step(abs(wp.y - ${f(CASTLE.z)}), 26.3);
         keep *= smoothstep(${f(PLAYGROUND.r - 1.2)}, ${f(PLAYGROUND.r + 0.8)}, distance(wp, vec2(${f(PLAYGROUND.x)}, ${f(PLAYGROUND.z)})));
         keep *= mix(1.0, step(fract(hsh * 7.31), 0.05), uSnow);                       // winter: only a few dry stalks show through the snow
@@ -795,6 +877,7 @@ export function buildScenery(scene) {
   const LEAVES_PER = foliage.userData.full / trees.length;   // leaves are laid down tree by tree, so the last trees can simply go without
   foliage.userData.full = Math.round(LEAVES_PER * (trees.length - 4)); foliage.count = foliage.userData.full;
   const land = hills(); scene.add(land);
+  scene.add(cove(), seaWater(U));
   const woods = hillWoods(r, U, bareGeos[0]); scene.add(woods);
   let detailQ = 1, lodT = -1;
   for (let i = 0; i < 46; i++) {                             // rounded boulders, a few big ones
@@ -847,6 +930,12 @@ export function buildScenery(scene) {
     // 0.3 .. 1: draw that fraction of the grass and leaves (instances are in random order, so it thins evenly)
     setDetail(q) { detailQ = q; lodT = -1; for (const m of [grassNear, grassFar, foliage, woods.userData.leaves]) m.count = Math.floor(m.userData.full * q); },
     get season() { return season; },
+    // leaf clumps at the given points ({x,y,z,s} in the world), in the trees' own greens; they flutter with the trees
+    ivy(points, seed = 77) {
+      const rr = rng(seed), m = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1), clumpMaterial(U), points.length), d = new THREE.Object3D(), c = new THREE.Color();
+      points.forEach((p, i) => { d.position.set(p.x, p.y, p.z); d.scale.setScalar(p.s); d.updateMatrix(); m.setMatrixAt(i, d.matrix); c.copy(TONES[0]).lerp(TONES[1 + Math.floor(rr() * 3)], 0.35 + rr() * 0.6 * (p.lit ?? 0.7)); m.setColorAt(i, c); });
+      m.frustumCulled = false; scene.add(m); return m;
+    },
     get wind() { return U.wind.value; }, get windTime() { return U.time.value; },
     // a tree is bare when (nearly) none of its leaves are being drawn
     isBare(i) { return season !== 'summer' || (foliage.count - i * LEAVES_PER) / LEAVES_PER < 0.35; },

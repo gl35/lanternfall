@@ -6,7 +6,7 @@
 import * as THREE from 'three';
 import { CASTLE, hillHeight } from './scenery.js';
 
-export function buildCastle(scene, { spawn, sfx, addBox }) {
+export function buildCastle(scene, { spawn, sfx, addBox, ivy }) {
   const Y0 = CASTLE.y, group = new THREE.Group(); group.position.set(CASTLE.x, Y0, CASTLE.z); scene.add(group);
   const rnd = (a, b) => a + Math.random() * (b - a), pick = list => list[Math.floor(Math.random() * list.length)];
 
@@ -51,11 +51,11 @@ export function buildCastle(scene, { spawn, sfx, addBox }) {
   const [stoneTex, stoneBump] = (() => {
     const N = 512, c = document.createElement('canvas'), b = document.createElement('canvas'); c.width = c.height = b.width = b.height = N;
     const g = c.getContext('2d'), h = b.getContext('2d'), ROWS = 8, RH = N / ROWS;
-    g.fillStyle = '#cdbfa6'; g.fillRect(0, 0, N, N); h.fillStyle = '#8a8a8a'; h.fillRect(0, 0, N, N);       // mortar, only a shade darker than the stone
+    g.fillStyle = '#b3a58c'; g.fillRect(0, 0, N, N); h.fillStyle = '#6a6a6a'; h.fillRect(0, 0, N, N);       // mortar, only a shade darker than the stone
     for (let row = 0; row < ROWS; row++) {
       let x = -Math.random() * 60;
       while (x < N) {
-        const w = 46 + Math.random() * 70, v = 214 + Math.random() * 18, warm = 10 + Math.random() * 8, y = row * RH;
+        const w = 46 + Math.random() * 70, v = 196 + Math.random() * 34, warm = 8 + Math.random() * 12, y = row * RH;
         const hv = 170 + Math.random() * 70;
         const draw = ox => {
           g.fillStyle = `rgb(${v + warm},${v + warm * 0.3},${v - 22})`; g.beginPath(); g.roundRect(ox + 2, y + 2, w - 4, RH - 4, 7); g.fill();
@@ -71,7 +71,7 @@ export function buildCastle(scene, { spawn, sfx, addBox }) {
     const mk = cv => { const t = new THREE.CanvasTexture(cv); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 8; return t; };
     const t = mk(c); t.colorSpace = THREE.SRGBColorSpace; return [t, mk(b)];
   })();
-  const STONE = new THREE.MeshStandardMaterial({ map: stoneTex, bumpMap: stoneBump, bumpScale: 0.8, roughness: 0.9, side: THREE.DoubleSide });
+  const STONE = new THREE.MeshStandardMaterial({ map: stoneTex, bumpMap: stoneBump, bumpScale: 1.6, roughness: 0.95, side: THREE.DoubleSide });
   const WALLS = STONE.clone(); WALLS.vertexColors = true;      // the big stonework is also shaded by hand: damp and mossy low down
   const DARK = new THREE.MeshStandardMaterial({ color: 0xc4b392, roughness: 0.9 }), ROOF = new THREE.MeshStandardMaterial({ color: 0x4a7ec2, roughness: 0.65 });
   const WOOD = new THREE.MeshStandardMaterial({ color: 0xb37a45, roughness: 0.8 }), GOLD = new THREE.MeshStandardMaterial({ color: 0xf2c84a, roughness: 0.35, metalness: 0.6 });
@@ -80,7 +80,7 @@ export function buildCastle(scene, { spawn, sfx, addBox }) {
     const pos = [], uv = [], col = [];
     const quad = (a, b, c, d, kind) => { for (const p of [a, b, c, a, c, d]) {
       pos.push(p[0], p[1], p[2]); uv.push((kind === 'x' ? p[2] : p[0]) / 3.2, (kind === 'y' ? p[2] : p[1]) / 3.2);
-      const low = Math.max(0, 1 - p[1] / 1.4), moss = kind === 'y' ? 0 : low * low * 0.35, sh = kind === 'y' ? 1.04 : 0.93 + 0.07 * Math.min(1, p[1] / 3);
+      const low = Math.max(0, 1 - p[1] / 2.4), n = 0.5 + 0.5 * Math.sin(p[0] * 0.8 + p[2] * 1.1), moss = kind === 'y' ? 0 : low * low * (0.35 + 0.5 * n), sh = kind === 'y' ? 1.03 : 0.88 + 0.12 * Math.min(1, p[1] / 3);
       col.push(sh * (1 - moss * 0.34), sh * (1 - moss * 0.16), sh * (1 - moss * 0.42));
     } };
     for (const s of SOLIDS) {
@@ -276,6 +276,27 @@ export function buildCastle(scene, { spawn, sfx, addBox }) {
   const GLOW = new THREE.MeshBasicMaterial({ color: 0xffc66a, toneMapped: false });
   void GLOW;
 
+  // ivy: the same leaves as the trees, climbing in tongues from the ground up the outer walls, the turrets and the keep
+  if (ivy) {
+    const pts = [], rndS = (() => { let a = 4217; return () => ((a = (a * 16807) % 2147483647) / 2147483647); })();
+    const tongue = (x, z, nx, nz, w, h) => {                 // rooted at x,z on a face whose outward direction is nx,nz
+      const n = Math.round(w * h * 2.6);
+      for (let k = 0; k < n; k++) {
+        const v = Math.pow(rndS(), 1.5) * h, spread = w * (1 - v / h * 0.7) * 0.5, u = (rndS() - 0.5) * 2 * spread + Math.sin(v * 1.3 + x) * 0.5;
+        pts.push({ x: CASTLE.x + x - nz * u + nx * (0.12 + rndS() * 0.16), y: Y0 + 0.15 + v, z: CASTLE.z + z + nx * u + nz * (0.12 + rndS() * 0.16), s: 0.5 + rndS() * 0.45, lit: 0.4 + v / h * 0.6 });
+      }
+    };
+    for (const x of [-19, -8.5, 11, 20]) tongue(x, S, 0, 1, 4.5 + (x * 7 % 3), 3.2 + Math.abs(x % 4));
+    for (const x of [-17, -3, 9, 21]) tongue(x, -S, 0, -1, 5, 3.4 + Math.abs(x % 3));
+    for (const z of [-18, -4, 8, 19]) { tongue(-S, z, -1, 0, 5, 3 + Math.abs(z % 4)); tongue(S, z + 3, 1, 0, 4.6, 3.6 + Math.abs(z % 3)); }
+    for (const [x, z, r, h] of TURRETS) for (let k = 0; k < Math.round(r * h * 1.7); k++) {   // wrapped part of the way round each turret
+      const a = (rndS() - 0.5) * 2.2 + x * 0.3 + z * 0.2, v = Math.pow(rndS(), 1.4) * h * 0.62;
+      pts.push({ x: CASTLE.x + x + Math.cos(a) * (r + 0.18), y: Y0 + 0.2 + v, z: CASTLE.z + z + Math.sin(a) * (r + 0.18), s: 0.5 + rndS() * 0.45, lit: 0.4 + v / h });
+    }
+    tongue(-4.5, -11, -1, 0, 5, 4.5); tongue(2.5, -15.5, 0, -1, 4, 3.6);     // and on the keep, from the terrace up
+    for (const p of pts.slice(-Math.round(5 * 4.5 * 2.6 + 4 * 3.6 * 2.6))) p.y += 5;
+    ivy(pts);
+  }
   // fireballs meet the stonework too
   for (const s of SOLIDS) { const top = Math.max(s.top(s.x0, s.z0), s.top(s.x1, s.z1)), h = (top - s.y0) / 2; addBox(CASTLE.x + (s.x0 + s.x1) / 2, Y0 + s.y0 + h, CASTLE.z + (s.z0 + s.z1) / 2, (s.x1 - s.x0) / 2, h, (s.z1 - s.z0) / 2); }
 
