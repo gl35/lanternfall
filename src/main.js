@@ -330,6 +330,7 @@ function perches() {
   if (PERCH) return PERCH;
   PERCH = [];
   TREES.forEach((t, i) => scenery.limbs(i).forEach(l => {
+    if (l.b.y - l.a.y > 0.8 * Math.hypot(l.b.x - l.a.x, l.b.z - l.a.z)) return;   // not the limb that sticks straight up: nowhere to sit on that
     const k = 0.58, x = l.a.x + (l.b.x - l.a.x) * k, y = l.a.y + (l.b.y - l.a.y) * k, z = l.a.z + (l.b.z - l.a.z) * k;
     PERCH.push({ tree: i, x, y: y + l.r0 + (l.r1 - l.r0) * k, z, dx: l.b.x - l.a.x, dz: l.b.z - l.a.z });
   }));
