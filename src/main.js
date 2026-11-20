@@ -171,7 +171,7 @@ let flyW = 0, wingW = 0;
 const FLY_ZERO = [0, 0, 0];
 // Her wings: a modelled pair, cut down the middle into a left and a right so each can beat from her back.
 const wings = new THREE.Group(), wingP = new THREE.Vector3();
-const WING = { scale: 1.8, root: 0.05 };                     // how big they are, and how far up the model they join her back
+const WING = { scale: 1.15, root: 0.05 };                     // how big they are, and how far up the model they join her back
 {
   for (const side of [1, -1]) wings.add(new THREE.Group());
   new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).load(import.meta.env.BASE_URL + 'models/wings.glb', g => {
@@ -1119,7 +1119,7 @@ function step(dtReal) {
     wings.visible = heroIx === KID && player.flying && player.y > 0 && !!flyBones.Spine2 && !!wings.userData.ready;   // hers alone, and only in the air
     if (wings.visible) {                                           // they sit between her shoulder blades and beat
       wingW += (1 - wingW) * Math.min(1, dtReal * 7);
-      heroTilt.worldToLocal(flyBones.Spine2.bone.getWorldPosition(wingP)); wings.position.set(wingP.x, wingP.y + 0.25, wingP.z + 0.24);
+      heroTilt.worldToLocal(flyBones.Spine2.bone.getWorldPosition(wingP)); wings.position.set(wingP.x, wingP.y + 0.14, wingP.z + 0.1);
       wings.scale.setScalar(Math.max(0.01, wingW));
       const beat = 0.14 + (0.5 + 0.5 * Math.sin(time * 5.2)) * 0.5, fold = Math.sin(time * 5.2 - 0.9) * 0.12;   // they sweep back from her shoulders and never forward, so they stay clear of her arms
       wings.children[0].rotation.set(0, -beat, fold); wings.children[1].rotation.set(0, beat, -fold);
