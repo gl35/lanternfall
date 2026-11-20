@@ -73,7 +73,7 @@ const HEROES = [
   { file: 'general-animated.glb', scale: 2.5, turn: Math.PI, lift: 0, speed: 4.8, hand: 2.15, cam: 0 },
   { file: 'warrior.glb', scale: 4.4, turn: Math.PI, lift: 0.489, speed: 9.5, hand: 3.3, cam: 1, mount: true },
   { file: 'woman.glb', scale: 2.7, turn: Math.PI, lift: 0, speed: 5.0, hand: 2.15, cam: 0, glide: true },   // modelled in one fixed pose, with no clips: she drifts over the grass
-  { file: 'kid.glb', scale: 1.9, turn: Math.PI, lift: 0, speed: 5.4, hand: 1.6, cam: -0.2 },   // a copy of the kid, made when her model loads
+  { file: 'kid.glb', scale: 1.9, turn: Math.PI, lift: 0, speed: 4.8, hand: 1.6, cam: -0.2, fly: true },   // a copy of the kid, made when her model loads
 ];
 const KID = 3;
 let heroIx = 0, HERO = HEROES[heroIx], heroModel = null, heroLoads = 0;
@@ -277,8 +277,11 @@ function playerDismount() {
 const SWAP = [0, KID, 2, 1];                                // the general, the kid, the warrior woman, the rider
 function swapHero() {
   playerDismount(); player.y = 0; player.vy = 0;
-  const from = heroIx, to = SWAP[(SWAP.indexOf(heroIx) + 1) % SWAP.length], g0 = heroCache[HEROES[0].file];
-  if (HEROES.some(h => !heroCache[h.file]) || !kid.mixer || !npc.loaded || state !== 'play' || aim.on) return false;
+  const ready = ix => heroCache[HEROES[ix].file] && (ix === KID ? kid.mixer : ix === 1 ? npc.loaded : ix === 2 ? stand2.on : true);
+  const from = heroIx; let to = from;
+  for (let k = 1; k < SWAP.length && to === from; k++) { const ix = SWAP[(SWAP.indexOf(from) + k) % SWAP.length]; if (ready(ix)) to = ix; }
+  if (to === from || state !== 'play' || aim.on) return false;
+  player.flying = false;
   const px = player.x, pz = player.z, py = player.g, ry = hero.rotation.y;
   if (to === KID && kid.ride) kidDismount();
   if (STANDS[to] && STANDS[to].mixer) { STANDS[to].mixer.stopAllAction(); STANDS[to].mixer = null; }
@@ -661,7 +664,7 @@ function buildLevel() {
   });
   total = lanterns.length;
   scenery.setSeason(seasonFor(level));
-  playerDismount(); player.y = 0; player.vy = 0; player.rideLock = null;
+  playerDismount(); player.y = 0; player.vy = 0; player.rideLock = null; player.flying = false;
   player.x = START.x; player.z = START.z; player.face = 0; camYaw = 0; camReady = false;
   state = 'play'; stateT = 0; combo = 0; cooldown = 0;
   hud();
@@ -771,9 +774,10 @@ function fling(yawRel, power) {
   if (state !== 'play' || cooldown > 0) return false;
   const yaw = camYaw + yawRel;
   handPos(yaw, hand);
+  for (const off of HERO.fly ? [-0.15, 0, 0.15] : [0]) {
   const body = new CANNON.Body({ mass: 6, shape: new CANNON.Sphere(BALL_R) });
   body.position.set(hand.x, hand.y, hand.z);
-  const v = launchVel(yaw, power, tmpV); body.velocity.set(v.x, v.y, v.z);
+  const v = launchVel(yaw + off, power, tmpV); body.velocity.set(v.x, v.y, v.z);
   body.angularDamping = 0.3; body.linearDamping = 0.02;
   const mesh = new THREE.Mesh(sphereGeo, noBall); mesh.scale.setScalar(BALL_R); mesh.add(haloSprite(3.0, 0.3, 0xff8a3a)); ballFlames(mesh);
   mesh.position.copy(hand);
@@ -782,6 +786,7 @@ function fling(yawRel, power) {
     if (e.body.type !== CANNON.Body.STATIC) wakeNear(body.position, 7);
     onHit(e);
   });
+  }
   player.face = yaw; heroKick = 1; cooldown = 0.4;
   sfx.whoosh(power);
   if (!localStorage.getItem('lanternfall.played')) { localStorage.setItem('lanternfall.played', '1'); elHint.classList.add('off'); }
@@ -920,7 +925,7 @@ function lightBeacon(b) {
   if (lit === beacons.length) { for (const q of beacons) fireflies(q.x, q.h + 8, q.z, 60); setTimeout(() => sfx.win(), 700); }
 }
 function updateHills(dt) {
-  const reach = HERO.mount ? 2.6 : 1.9;
+  const reach = HERO.mount ? 2.6 : HERO.fly ? 3.4 : 1.9;
   moteT -= dt; if (moteT <= 0) moteCombo = 0;
   for (let i = motes.length - 1; i >= 0; i--) {
     const m = motes[i], d = Math.hypot(m.x - player.x, m.z - player.z);
@@ -945,14 +950,22 @@ function updateHills(dt) {
 
 function jump() {
   if (player.ride) { playerDismount(); return true; }
+  if (HERO.fly && player.y > 0.01) {
+    if (state !== 'play' || player.y > 18) return false;
+    player.vy = 6.4; player.flying = true; sfx.whoosh(0.15); fireflies(player.x, player.g + player.y + 0.6, player.z, 6, false);
+    return true;
+  }
   if (state !== 'play' || player.y > 0.01) return false;
   player.vy = JUMP_V; player.y = 0.011; sfx.whoosh(0.1);
   return true;
 }
 function movePlayer(dt) {
   if (player.y > 0 || player.vy > 0) {
-    player.vy -= GRAVITY * dt; player.y += player.vy * dt;
-    if (player.y <= 0) { player.y = 0; player.vy = 0; dust(player.x, player.g + 0.15, player.z, 3); sfx.thump(0.25); }
+    const fl = HERO.fly && player.flying;
+    player.vy -= GRAVITY * (fl ? 0.55 : 1) * dt; if (fl && player.vy < -2.4) player.vy = -2.4;      // she drifts down
+    player.y += player.vy * dt;
+    if (fl) { player.trail = (player.trail || 0) - dt; if (player.trail <= 0) { player.trail = 0.08; fireflies(player.x, player.g + player.y + 0.3, player.z, 1, false); } }
+    if (player.y <= 0) { player.y = 0; player.vy = 0; player.flying = false; dust(player.x, player.g + 0.15, player.z, 3); sfx.thump(0.25); }
   }
   let jx = joy.x, jy = joy.y;
   if (keys.has('KeyA') || keys.has('ArrowLeft')) jx -= 1;
@@ -972,7 +985,8 @@ function movePlayer(dt) {
     camYaw += jx * 1.15 * dt;                                // pushing sideways swings the view round as he walks
     const s = Math.sin(camYaw), c = Math.cos(camYaw);
     const mx = c * jx + s * -jy, mz = s * jx - c * -jy;      // right * jx + forward * (-jy)
-    player.x += mx * SPEED * dt; player.z += mz * SPEED * dt;
+    const sp = SPEED * (player.flying ? 1.6 : 1);
+    player.x += mx * sp * dt; player.z += mz * sp * dt;
     if (!(aim.on && aim.valid) && heroKick <= 0) player.face = Math.atan2(mx, -mz);
     player.walkT += dt * (HERO.mount ? 4 + 5 * l : 5 + 6 * l);
   }
@@ -1007,10 +1021,11 @@ function updateCamera(dtReal) {
   const blocked = (d, k) => { const x = player.x - tmpF.x * d, z = player.z - tmpF.z * d; return TREES.some(t => Math.hypot(x - t.x, z - t.z) < k * t.s) || near.some(t => Math.hypot(x - t.x, z - t.z) < k * 0.75 * t.r); };
   while (D > 3 && blocked(D, 4.6)) D -= 0.5;
   if (D <= 3) { H = 2.3; D = D0 * 0.75; while (D > 1.6 && blocked(D, 1.2)) D -= 0.4; }
-  camPos.set(player.x - tmpF.x * D, H + player.g + player.y * 0.5, player.z - tmpF.z * D);
+  const lift = player.y * (player.flying ? 0.9 : 0.5);
+  camPos.set(player.x - tmpF.x * D, H + player.g + lift, player.z - tmpF.z * D);
   camPos.y = Math.max(camPos.y, hillHeight(camPos.x, camPos.z) + 1.6);                        // never under a slope behind him
   const ax = player.x + tmpF.x * 7, az = player.z + tmpF.z * 7;                                 // look along the slope he is on
-  camAt.set(ax, 1.7 + HERO.cam + player.y * 0.5 + player.g + (hillHeight(ax, az) - player.g) * 0.5, az);
+  camAt.set(ax, 1.7 + HERO.cam + lift * (player.flying ? 0.8 : 1) + player.g + (hillHeight(ax, az) - player.g) * 0.5, az);
   const k = camReady ? Math.min(1, dtReal * 7) : 1; camReady = true;
   camera.position.lerp(camPos, k);
   shake = Math.max(0, shake - dtReal * 1.6);
@@ -1052,15 +1067,17 @@ function step(dtReal) {
   hero.position.set(player.x, player.g + player.y + (HERO.glide ? 0.1 + Math.sin(time * 2.2) * 0.05 : air ? 0 : Math.abs(stride) * (HERO.mount ? 0.3 : 0.09) * fake), player.z);
   const tuck = air && !CLIP.jump ? THREE.MathUtils.clamp(player.vy / JUMP_V, -1, 1) * -0.22 : 0;
   if (HERO.mount) heroTilt.rotation.set(Math.sin(player.walkT * 2 + 0.9) * 0.085 * bob + tuck * 1.3, 0, 0);   // a rocking gallop
+  else if (player.flying) heroTilt.rotation.set(-0.85 * bob, 0, Math.sin(time * 2.4) * 0.06);
   else if (HERO.glide) heroTilt.rotation.set(-0.08 * bob + tuck, 0, Math.sin(time * 1.6) * 0.025);   // leans into it, swaying a little
   else heroTilt.rotation.set(-0.16 * fake + tuck, 0, stride * 0.05 * fake);
   if (heroLoaded) {
     heroKick = Math.max(0, heroKick - dtReal / THROW.hold);
-    const mode = state === 'won' ? 'win' : heroKick > 0 ? 'throw' : aiming ? 'aim' : air && CLIP.jump ? 'jump' : player.moving > 0.25 && CLIP.walk ? 'walk' : 'idle';
+    const mode = state === 'won' ? 'win' : heroKick > 0 ? 'throw' : aiming ? 'aim' : air && player.flying && CLIP.jump ? 'fly' : air && CLIP.jump ? 'jump' : player.moving > 0.25 && CLIP.walk ? 'walk' : 'idle';
     if (mode !== heroMode) {
       if (mode === 'win') heroPlay(CLIP.win || CLIP.idle, { fade: 0.4 });
       else if (mode === 'aim') heroPlay(THROW.clip, { fade: 0.18, speed: 0, at: THROW.wind });
       else if (mode === 'throw') heroPlay(THROW.clip, { fade: 0.08, speed: THROW.speed, once: true, at: heroMode === 'aim' ? null : THROW.wind });
+      else if (mode === 'fly') heroPlay(CLIP.jump, { fade: 0.15, speed: 0, at: HOP.t0 + (HOP.t1 - HOP.t0) * 0.5 });
       else if (mode === 'jump') heroPlay(CLIP.jump, { fade: 0.08, once: true, at: HOP.t0, speed: (HOP.t1 - HOP.t0) / (2 * JUMP_V / GRAVITY) });
       else if (mode === 'walk') heroPlay(CLIP.walk, { fade: 0.2 });
       else heroPlay(CLIP.idle, { fade: 0.35 });
