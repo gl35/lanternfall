@@ -59,7 +59,7 @@ function findHop(clip) {
 function pickClips() {
   const names = Object.keys(acts), find = re => names.find(n => re.test(n)) || null;
   CLIP.idle = find(/idle|breath|stand/i) || find(/look/i) || names[0];
-  CLIP.walk = find(/run|jog/i) || find(/walk/i);
+  CLIP.walk = (HERO.stroll && find(/^walk$/i)) || find(/run|jog/i) || find(/walk/i);   // the kid walks rather than runs
   CLIP.jump = names.find(n => /^(jump|leap)$/i.test(n)) || find(/jump|leap/i);
   if (CLIP.jump) findHop(acts[CLIP.jump].getClip());
   CLIP.win = find(/dance|cheer|victory/i);
@@ -73,7 +73,7 @@ const HEROES = [
   { file: 'general-animated.glb', scale: 2.5, turn: Math.PI, lift: 0, speed: 4.8, hand: 2.15, cam: 0 },
   { file: 'warrior.glb', scale: 4.4, turn: Math.PI, lift: 0.489, speed: 9.5, hand: 3.3, cam: 1, mount: true },
   { file: 'woman.glb', scale: 2.7, turn: Math.PI, lift: 0, speed: 5.0, hand: 2.15, cam: 0, glide: true },   // modelled in one fixed pose, with no clips: she drifts over the grass
-  { file: 'kid.glb', scale: 1.9, turn: Math.PI, lift: 0, speed: 4.8, hand: 1.6, cam: -0.2, fly: true },   // a copy of the kid, made when her model loads
+  { file: 'kid.glb', scale: 1.9, turn: Math.PI, lift: 0, speed: 3.6, hand: 1.6, cam: -0.2, fly: true, stroll: true },   // a copy of the kid, made when her model loads
 ];
 const KID = 3;
 let heroIx = 0, HERO = HEROES[heroIx], heroModel = null, heroLoads = 0;
@@ -1021,7 +1021,7 @@ function movePlayer(dt) {
     camYaw += jx * 1.15 * dt;                                // pushing sideways swings the view round as he walks
     const s = Math.sin(camYaw), c = Math.cos(camYaw);
     const mx = c * jx + s * -jy, mz = s * jx - c * -jy;      // right * jx + forward * (-jy)
-    const sp = SPEED * (player.flying ? 1.6 : 1);
+    const sp = SPEED * (player.flying ? 2.1 : 1);
     player.x += mx * sp * dt; player.z += mz * sp * dt;
     if (!(aim.on && aim.valid) && heroKick <= 0) player.face = Math.atan2(mx, -mz);
     player.walkT += dt * (HERO.mount ? 4 + 5 * l : 5 + 6 * l);
@@ -1119,7 +1119,7 @@ function step(dtReal) {
       else heroPlay(CLIP.idle, { fade: 0.35 });
       heroMode = mode;
     }
-    if (mode === 'walk') heroAct.timeScale = 0.6 + player.moving * 1.5;
+    if (mode === 'walk') heroAct.timeScale = HERO.stroll ? 0.7 + player.moving * 1.0 : 0.6 + player.moving * 1.5;
     mixer.update(dtReal);
     flyW += ((heroMode === 'fly' ? 1 : 0) - flyW) * Math.min(1, dtReal * 8);
     wings.visible = heroIx === KID && player.flying && player.y > 0 && !!flyBones.Spine2;   // hers alone, and only in the air
