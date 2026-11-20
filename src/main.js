@@ -168,7 +168,25 @@ const KID_POSE = {
 };
 const flyBones = {}, FLY_POSE = { LeftArm: [20, 0, 0], RightArm: [20, 0, 0], LeftForeArm: [0, 0, 0], RightForeArm: [0, 0, 0], LeftHand: [0, 0, 0], RightHand: [0, 0, 0] };   // arms straight out to the sides, like wings
 let flyW = 0, wingW = 0;
-const SIT_POSE = { LeftUpLeg: [-82, 0, 0], RightUpLeg: [-82, 0, 0], LeftLeg: [78, 0, 0], RightLeg: [78, 0, 0], LeftArm: [-58, 0, 0], RightArm: [-58, 0, 0] };
+const SIT_POSE = { LeftArm: [-58, 0, 0], RightArm: [-58, 0, 0] };
+// Turn a bone so the stretch from it to its child points along a given direction (in the world), keeping its twist.
+const aimA = new THREE.Vector3(), aimB = new THREE.Vector3(), aimQ = new THREE.Quaternion(), aimW = new THREE.Quaternion(), aimP = new THREE.Quaternion();
+function aimBone(bone, child, dir, w) {
+  bone.getWorldPosition(aimA); child.getWorldPosition(aimB); aimB.sub(aimA).normalize();
+  aimQ.setFromUnitVectors(aimB, dir); bone.getWorldQuaternion(aimW); bone.parent.getWorldQuaternion(aimP);
+  aimW.premultiply(aimQ).premultiply(aimP.invert());
+  bone.quaternion.slerp(aimW, w);
+}
+const sitD = new THREE.Vector3(), sitQ = new THREE.Quaternion();
+function sitLegs(w) {                                        // thighs out level in front of her, knees a little apart; shins hang and swing in turn
+  heroTilt.getWorldQuaternion(sitQ);
+  for (const [side, sx, ph] of [['Left', 1, 0], ['Right', -1, Math.PI]]) {
+    const up = flyBones[side + 'UpLeg'], leg = flyBones[side + 'Leg'], foot = flyBones[side + 'Foot']; if (!up || !leg || !foot) return;
+    aimBone(up.bone, leg.bone, sitD.set(sx * 0.14, -0.1, -1).normalize().applyQuaternion(sitQ), w);
+    const a = Math.sin(time * 2.6 + ph) * 0.42 + 0.08;
+    aimBone(leg.bone, foot.bone, sitD.set(sx * 0.03, -Math.cos(a), -Math.sin(a)).normalize().applyQuaternion(sitQ), w);
+  }
+}
 const FLY_ZERO = [0, 0, 0];
 // Her wings: a modelled pair, cut down the middle into a left and a right so each can beat from her back.
 const wings = new THREE.Group(), wingP = new THREE.Vector3();
@@ -1169,9 +1187,9 @@ function step(dtReal) {
     } else wingW = 0;
     if (flyW > 0.01 && HERO.fly) for (const n in flyBones) {
       const b = flyBones[n]; let [x, y, z] = POSE[n] || FLY_ZERO;
-      if (player.perch && (n === 'LeftLeg' || n === 'RightLeg')) x += Math.sin(time * 3.1 + (n === 'LeftLeg' ? 0 : Math.PI)) * 26 - 6;   // her shins swing, one forward as the other comes back
       b.bone.quaternion.slerp(kidQ.copy(b.bind).multiply(kidQ2.setFromEuler(kidE.set(x * D2R, y * D2R, z * D2R))), flyW);
     }
+    if (player.perch && HERO.fly) sitLegs(flyW);
   }
 
   showAim();
