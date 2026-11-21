@@ -331,6 +331,7 @@ function cloakUpdate(C, parent, bones, flow, T) {
 // Her clothes are part of her one skin and one picture, so the dress is painted into that picture: every cloth-coloured
 // (white, grey or black) bit of it that lies on her body between her shoulders and the hem of her skirt. Skin and hair are left alone.
 const HAIR_DYE = [0, 0, 0, 0];                                // the sum of every fully dyed bit of her hair, and how many
+const SHOE_TOP = 0.03;                                       // how far above her ankles her shoes come, as a part of her height
 function dressKid(root) {
   let mesh = null; root.traverse(o => { if (o.isSkinnedMesh && !mesh) mesh = o; });
   if (!mesh || !mesh.material.map || !mesh.material.map.image || !mesh.skeleton) return;
@@ -351,6 +352,7 @@ function dressKid(root) {
     const face = h > 0.93 && o < 0.055 && (dep[a] + dep[b] + dep[c]) / 3 > 0;                               // eyes, brows and mouth are dark too, and stay as they are
     const tips = h > 0.76 && o < 0.3 && !face ? Math.pow(Math.min(1, Math.max(0, (1.075 - h) / 0.2)), 1.3) : 0;   // black at the roots, fading to purple down the length                     // the lower lengths of her hair
     if (tips > 0) { const q8 = Math.round(tips * 255); hm.fillStyle = hm.strokeStyle = 'rgb(' + q8 + ',' + q8 + ',' + q8 + ')'; hm.beginPath(); for (const q of [a, b, c]) { const x = uv.getX(q) * W, y = (map.flipY ? 1 - uv.getY(q) : uv.getY(q)) * H; q === a ? hm.moveTo(x, y) : hm.lineTo(x, y); } hm.closePath(); hm.fill(); hm.stroke(); }
+    if (h < SHOE_TOP) { m.fillStyle = m.strokeStyle = 'rgb(0,0,255)'; m.beginPath(); for (const q of [a, b, c]) { const x = uv.getX(q) * W, y = (map.flipY ? 1 - uv.getY(q) : uv.getY(q)) * H; q === a ? m.moveTo(x, y) : m.lineTo(x, y); } m.closePath(); m.fill(); m.stroke(); continue; }   // her shoes
     const skirt = h > 0.25 && h < 0.66 && o < 0.26, bodice = h > 0.58 && h < 0.965 && o < 0.225; if (!skirt && !bodice) continue;
     const belt = !skirt && h < 0.76 && o < 0.2;                  // the band at her waist, just above where the skirt starts
     m.fillStyle = m.strokeStyle = 'rgb(' + (skirt ? 255 : 0) + ',' + (bodice ? 255 : 0) + ',' + (belt ? 255 : 0) + ')';
@@ -361,6 +363,11 @@ function dressKid(root) {
     if (hp[i] > 8 && !(mp[i + 2] > 128)) {                   // hair is the dark there: dyed purple toward the ends, the strands kept
       const mx0 = Math.max(d[i], d[i + 1], d[i + 2]), mn0 = Math.min(d[i], d[i + 1], d[i + 2]);
       if (mx0 < 84 && mx0 - mn0 < 30) { const k = hp[i] / 255, L0 = (d[i] + d[i + 1] + d[i + 2]) / 765; d[i] += (Math.min(255, 128 + 560 * L0) - d[i]) * k; d[i + 1] += (Math.min(255, 52 + 340 * L0) - d[i + 1]) * k; d[i + 2] += (Math.min(255, 226 + 200 * L0) - d[i + 2]) * k; if (k > 0.97) { HAIR_DYE[0] += d[i]; HAIR_DYE[1] += d[i + 1]; HAIR_DYE[2] += d[i + 2]; HAIR_DYE[3]++; } continue; }
+    }
+    if (mp[i + 2] > 128 && mp[i] < 128 && mp[i + 1] < 128) {     // shoes: the dress's purple, their shading kept
+      const mx1 = Math.max(d[i], d[i + 1], d[i + 2]), mn1 = Math.min(d[i], d[i + 1], d[i + 2]);
+      if (mx1 < 62 || (mx1 - mn1) / mx1 < 0.25) { const t = Math.min(1, (d[i] + d[i + 1] + d[i + 2]) / 765 * 1.6); d[i] = 120 + 70 * t; d[i + 1] = 66 + 70 * t; d[i + 2] = 214 + 36 * t; }
+      continue;
     }
     const skirt = mp[i] > 128, bodice = mp[i + 1] > 128; if (!skirt && !bodice) continue;
     const r = d[i], gg = d[i + 1], b = d[i + 2], mx = Math.max(r, gg, b), mn = Math.min(r, gg, b), L = (r + gg + b) / 765, cloth = mx < 62 || (mx - mn) / mx < 0.2;
