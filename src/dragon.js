@@ -138,13 +138,14 @@ export function buildDragon(renderer) {
     wings.push({ inner, outer });
   }
 
-  let ph = 0, walk = 0, t = 0, airS = 0, fireS = 0;
+  let ph = 0, walk = 0, t = 0, airS = 0, fireS = 0, glideS = 0;
   const lerp = (a, b, k) => a + (b - a) * k;
   // st: { air: on the ground or flying, speed, vy, turn (-1..1), ridden }
   function update(dt, st) {
     t += dt; airS += ((st.air ? 1 : 0) - airS) * Math.min(1, dt * 4); const a = airS;
-    ph += dt * (a > 0.5 ? 5.4 + Math.max(0, st.vy) * 0.5 : 1.3); walk += dt * st.speed * 1.9;
-    const flap = Math.sin(ph), lag = Math.sin(ph - 1.0);
+    glideS += ((st.glide ? 1 : 0) - glideS) * Math.min(1, dt * 2.5);                 // soaring: wings held wide, beating slow and shallow
+    ph += dt * (a > 0.5 ? (5.4 + Math.max(0, st.vy) * 0.5) * (1 - 0.6 * glideS) : 1.3); walk += dt * st.speed * 1.9;
+    const amp = 1 - 0.62 * glideS, flap = Math.sin(ph) * amp, lag = Math.sin(ph - 1.0) * amp;
     for (const w of wings) {
       w.inner.rotation.set(0, lerp(0.85, 0, a), lerp(0.7 + 0.03 * Math.sin(t * 1.3), 0.1 + 0.68 * flap, a));   // folded back and half raised on the ground
       w.outer.rotation.set(0, lerp(1.05, 0, a), lerp(-1.3, 0.05 + 0.62 * lag, a));

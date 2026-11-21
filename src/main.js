@@ -1235,16 +1235,21 @@ function flyDragon(dt, jx, jy, l) {
   let turn = 0;
   if (l > 0.12) {
     camYaw += jx * 1.15 * dt; turn = jx;
-    const sn = Math.sin(camYaw), c = Math.cos(camYaw), mx = c * jx + sn * -jy, mz = sn * jx - c * -jy, sp = air ? 10.5 : 3.4, k = Math.min(1, dt * (air ? 2 : 5));
+    const jf = air ? Math.min(jy, 0) : jy;                    // no flying backwards: back on the stick means down
+    const sn = Math.sin(camYaw), c = Math.cos(camYaw), mx = c * jx + sn * -jf, mz = sn * jx - c * -jf, sp = air ? 10.5 : 3.4, k = Math.min(1, dt * (air ? 2 : 5));
     e.vx += (mx * sp - e.vx) * k; e.vz += (mz * sp - e.vz) * k;
-    let dh = Math.atan2(mx, mz) - b.rotation.y; dh = Math.atan2(Math.sin(dh), Math.cos(dh)); b.rotation.y += dh * Math.min(1, dt * 4);
+    if (Math.hypot(mx, mz) > 0.15) { let dh = Math.atan2(mx, mz) - b.rotation.y; dh = Math.atan2(Math.sin(dh), Math.cos(dh)); b.rotation.y += dh * Math.min(1, dt * 4); }
   } else { const k = Math.min(1, dt * (air ? 0.7 : 6)); e.vx -= e.vx * k; e.vz -= e.vz * k; }
   e.turn += (turn - e.turn) * Math.min(1, dt * 4);
   let x = b.position.x + e.vx * dt, z = b.position.z + e.vz * dt;
   const d = Math.hypot(x, z); if (d > ROAM) { x *= ROAM / d; z *= ROAM / d; }
   if (!air) for (const t of TREES) { const dx = x - t.x, dz = z - t.z, dd = Math.hypot(dx, dz), rad = 0.7 * t.s + 1.3; if (dd < rad && dd > 1e-4) { x = t.x + dx / dd * rad; z = t.z + dz / dd * rad; } }
   const g = castle.groundAt(x, z, e.Y + 0.4);
-  if (e.Y > g + 0.02 || e.vy > 0) { e.vy = Math.max(-3.2, e.vy - 6.5 * dt); e.Y += e.vy * dt; if (e.Y > g + 46) { e.Y = g + 46; e.vy = Math.min(e.vy, 0); } }
+  const down = air && l > 0.12 && jy > 0.35; e.glide = air && !down && Math.abs(e.vy) < 1.5;
+  if (e.Y > g + 0.02 || e.vy > 0) {
+    if (down) e.vy += (-7 * jy - e.vy) * Math.min(1, dt * 3);
+    else { e.vy -= e.vy * Math.min(1, dt * 1.3); if (air && e.alt < 2.5 && e.vy < (2.5 - e.alt) * 2) e.vy = (2.5 - e.alt) * 2; }   // soaring: a climb levels off, and rising ground lifts her over it
+    e.Y += e.vy * dt; if (e.Y > g + 46) { e.Y = g + 46; e.vy = Math.min(e.vy, 0); } }
   if (e.Y <= g) { if (e.alt > 0.3) { dust(x, g + 0.2, z, 6); sfx.thump(0.3); } e.Y = g; e.vy = 0; }
   e.alt = e.Y - g; if (e.alt > 1) e.flew = true;
   b.position.set(x, e.Y, z); e.x = player.x = x; e.z = player.z = z; player.g = e.Y; player.y = 0; player.vy = 0; player.moving = 0;
@@ -1285,7 +1290,7 @@ function updatePlay(dt) {
     {                                                        // the dragon: riderless it settles to the ground and waits
       const e = play.dragon;
       if (!e.rider) { const g = hillHeight(e.x, e.z); e.Y = Math.max(g, e.Y - 5 * dt); e.alt = e.Y - g; e.vx = e.vz = e.vy = 0; e.turn *= 0.9; e.g.position.y = e.Y; }
-      dragon.update(dt, { air: e.alt > 0.05, speed: Math.hypot(e.vx, e.vz), vy: e.vy, turn: e.turn, ridden: e.rider, fire: e.fire > 0 });
+      dragon.update(dt, { air: e.alt > 0.05, speed: Math.hypot(e.vx, e.vz), vy: e.vy, turn: e.turn, ridden: e.rider, fire: e.fire > 0, glide: e.rider && e.glide });
       if (e.fire > 0) {                                      // purple fire: a hot pale core widening into violet
         e.fire -= dt; dragon.mouth.getWorldPosition(fireP);
         const pw = e.firePow ?? 0.5, yaw = e.fireYaw ?? Math.PI - e.g.rotation.y, lift = e.alt > 1 ? -0.4 + 0.75 * pw : 0.08 + 0.5 * pw, v0 = 26 + 22 * pw;   // from the air a light pull still rakes the ground
