@@ -362,6 +362,8 @@ function shoeBows(root) {
     const W = o => o.getWorldPosition(new THREE.Vector3()), sideV = W(lu).sub(W(ru)).setY(0).normalize(), fwd = W(ltB).sub(W(lfB)).setY(0).normalize(), sc = root.getWorldScale(new THREE.Vector3()).y / 1.9;
     proto.scale.setScalar(sc * BELT_BOW.size); proto.position.copy(W(spine)).addScaledVector(sideV, BELT_BOW.side * sc).addScaledVector(fwd, BELT_BOW.fwd * sc); proto.position.y += BELT_BOW.up * sc;
     proto.lookAt(proto.position.clone().addScaledVector(sideV, 0.72).addScaledVector(fwd, 0.7));          // facing out from her hip, half to the side and half to the front
+    const plum = silk.clone(), plumKnot = pearl.clone(); plum.color.set(0x6b1c7c); plumKnot.color.set(0x43104f);   // a dark plum: redder than the blue-violet of the belt behind it
+    proto.traverse(o => { if (o.isMesh) o.material = o.material === pearl ? plumKnot : plum; });
     proto.updateMatrixWorld(true); spine.attach(proto);
   }
 }
