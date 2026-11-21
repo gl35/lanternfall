@@ -151,6 +151,7 @@ const kid = { x: START.x + 7, z: START.z - 4, face: 0, group: new THREE.Group(),
     }
     m.traverse(o => { if (o.isBone) kid.bones[o.name.replace(/^mixamorig:?/, '')] = { bone: o, bind: o.quaternion.clone() }; });
     kid.model = m;
+    try { dressKid(m); } catch (err) { console.warn('dress not made', err); }
     kid.mixer = new THREE.AnimationMixer(m);
     for (const c of g.animations) kid.acts[c.name] = kid.mixer.clipAction(c);
     const twin = cloneSkinned(m); twin.rotation.y = Math.PI;
@@ -244,7 +245,9 @@ const WING = { scale: 1.15, root: 0.05 };                     // how big they ar
 // One for each copy of her (the one who wanders, and the one he steers). Built the first time her bones are there to measure her by.
 const cloakP = new THREE.Vector3(), CLOAK = { COLS: 13, ROWS: 14 };
 const kidCloak = { back: -1, mesh: null }, heroCloak = { back: 1, mesh: null };       // which way her back is, along z, in the group each hangs in
+const KID_CLOAK = false;                                     // she wears a dress now; true brings the cloak back
 function cloakUpdate(C, parent, bones, flow, T) {
+  if (!KID_CLOAK) return;
   const nb = bones.Neck || bones.Spine2; if (!nb) return;
   parent.worldToLocal(nb.bone.getWorldPosition(cloakP));
   if (!C.mesh) {
@@ -275,6 +278,39 @@ function cloakUpdate(C, parent, bones, flow, T) {
       bk * (Math.cos(ang) * rad * 0.8 + k * 0.05 + (wave + flow * 0.42 * t) * k));
   }
   p.needsUpdate = true; C.sheet.geometry.computeVertexNormals();
+}
+// Her clothes are part of her one skin and one picture, so the dress is painted into that picture: every cloth-coloured
+// (white, grey or black) bit of it that lies on her body between her shoulders and the hem of her skirt. Skin and hair are left alone.
+function dressKid(root) {
+  let mesh = null; root.traverse(o => { if (o.isSkinnedMesh && !mesh) mesh = o; });
+  if (!mesh || !mesh.material.map || !mesh.material.map.image || !mesh.skeleton) return;
+  const sk = mesh.skeleton, at = n => { const i = sk.bones.findIndex(b => b.name.replace(/^mixamorig:?/, '') === n); return i < 0 ? null : new THREE.Vector3().setFromMatrixPosition(new THREE.Matrix4().copy(sk.boneInverses[i]).invert()); };
+  const head = at('Head'), hips = at('Hips'), lf = at('LeftFoot'), rf = at('RightFoot'), la = at('LeftArm'), ra = at('RightArm'); if (!head || !hips || !lf || !rf || !la || !ra) return;
+  const foot = lf.clone().add(rf).multiplyScalar(0.5), up = head.clone().sub(foot), span = up.length(), side = la.clone().sub(ra).normalize(); up.normalize();
+  const map = mesh.material.map, img = map.image, W = img.width, H = img.height, pos = mesh.geometry.attributes.position, uv = mesh.geometry.attributes.uv, ix = mesh.geometry.index;
+  const cv = document.createElement('canvas'), mk = document.createElement('canvas'); cv.width = mk.width = W; cv.height = mk.height = H;
+  const g = cv.getContext('2d', { willReadFrequently: true }), m = mk.getContext('2d', { willReadFrequently: true }); g.drawImage(img, 0, 0, W, H);
+  m.fillStyle = '#000'; m.fillRect(0, 0, W, H); m.globalCompositeOperation = 'lighter'; m.lineWidth = 2; m.lineJoin = 'round';
+  const v = new THREE.Vector3(), hgt = [], out = [], n = ix ? ix.count : pos.count;
+  for (let i = 0; i < pos.count; i++) { v.fromBufferAttribute(pos, i); hgt.push(v.clone().sub(foot).dot(up) / span); out.push(Math.abs(v.sub(hips).dot(side)) / span); }
+  for (let k = 0; k < n; k += 3) {
+    const a = ix ? ix.getX(k) : k, b = ix ? ix.getX(k + 1) : k + 1, c = ix ? ix.getX(k + 2) : k + 2, h = (hgt[a] + hgt[b] + hgt[c]) / 3, o = (out[a] + out[b] + out[c]) / 3;
+    const skirt = h > 0.25 && h < 0.66 && o < 0.26, bodice = h > 0.58 && h < 0.965 && o < 0.225; if (!skirt && !bodice) continue;
+    m.fillStyle = m.strokeStyle = skirt && bodice ? '#ff0' : skirt ? '#f00' : '#0f0';
+    m.beginPath(); for (const q of [a, b, c]) { const x = uv.getX(q) * W, y = (map.flipY ? 1 - uv.getY(q) : uv.getY(q)) * H; q === a ? m.moveTo(x, y) : m.lineTo(x, y); } m.closePath(); m.fill(); m.stroke();
+  }
+  const px = g.getImageData(0, 0, W, H), mp = m.getImageData(0, 0, W, H).data, d = px.data;
+  for (let i = 0; i < d.length; i += 4) {
+    const skirt = mp[i] > 128, bodice = mp[i + 1] > 128; if (!skirt && !bodice) continue;
+    const r = d[i], gg = d[i + 1], b = d[i + 2], mx = Math.max(r, gg, b), mn = Math.min(r, gg, b), L = (r + gg + b) / 765, cloth = mx < 62 || (mx - mn) / mx < 0.2;
+    if (!cloth) continue;                                    // skin
+    if (skirt && L < 0.5) { const t = Math.min(1, L * 2.4); d[i] = 86 + 44 * t; d[i + 1] = 28 + 30 * t; d[i + 2] = 172 + 62 * t; }            // the dark of the skirt: deep violet, its folds kept
+    else if (skirt && !bodice) { d[i] = 196 * L + 30; d[i + 1] = 160 * L + 20; d[i + 2] = 255; }                                               // its pale stripes: lilac
+    else if (bodice && L > 0.42) { const t = 0.5 + 0.5 * L; d[i] = 118 * t; d[i + 1] = 52 * t; d[i + 2] = 236 * t; }                            // the white blouse: the dragon's purple
+  }
+  g.putImageData(px, 0, 0);
+  const tex = new THREE.CanvasTexture(cv); tex.flipY = map.flipY; tex.colorSpace = map.colorSpace; tex.wrapS = map.wrapS; tex.wrapT = map.wrapT; tex.anisotropy = map.anisotropy;
+  mesh.material.map = tex; mesh.material.needsUpdate = true;
 }
 const kidE = new THREE.Euler(), kidQ = new THREE.Quaternion(), kidQ2 = new THREE.Quaternion(), D2R = Math.PI / 180;
 function kidPose() {
