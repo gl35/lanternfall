@@ -17,7 +17,7 @@ function scaleBump() {                                       // overlapping rows
 }
 
 // With a model file given, that model is the dragon: the built one below stands in only until it has loaded (or if it fails to).
-export const DRAGON_FIT = { span: 10, turn: -Math.PI / 2, level: 0.85, seat: [0.6, 0.06], mouth: [0.75, 0.47], hinge: [0.75, 0.56] };   // hinge: how far out from her spine the wings start to swing (metres), and how high (part of her height)   // how long she is made; which way the model faces; where the kid sits and where the fire leaves, as parts of her height and length
+export const DRAGON_FIT = { span: 10, turn: -Math.PI / 2, level: 0.85, seat: [0.6, 0.06], mouth: [0.75, 0.47], hinge: [0.75, 0.56], low: 0.42, tailLow: 0.33, tailThick: 0.75 };   // tailLow: the tail's tip is looked for below this part of her height; tailThick: a slice wider than this (metres) is body, not tail   // hinge: how far out from her spine the wings start to swing (metres), and how high (part of her height)   // how long she is made; which way the model faces; where the kid sits and where the fire leaves, as parts of her height and length
 export function buildDragon(renderer, url) {
   const pm = new THREE.PMREMGenerator(renderer), env = pm.fromScene(new RoomEnvironment(), 0.04).texture; pm.dispose();
   const bump = scaleBump();
@@ -184,18 +184,72 @@ export function buildDragon(renderer, url) {
     // her body is not in the middle of her wings as modelled: she is slid across so her spine is on the centre line
     root.updateMatrixWorld(true); if (api.bones.Hips) { const hp = tilt.worldToLocal(api.bones.Hips.bone.getWorldPosition(new THREE.Vector3())); holder.position.x -= hp.x; }
     // her wings beat: everything out beyond her shoulders swings up and down about a hinge line along each side of her body
-    const wing = { uTilt: { value: new THREE.Matrix4() }, uInvTilt: { value: new THREE.Matrix4() }, uFlap: { value: 0 }, uHinge: { value: new THREE.Vector2(DRAGON_FIT.hinge[0], H * DRAGON_FIT.hinge[1] - pivot) } };
+    // Her wings beat: what lies out beyond her shoulders swings about a hinge line along each side of her body. Her tail and legs are left out of it
+    // (they are low down and close in), and the droop the wings were modelled with is taken out first, so they are straight and flat as they beat.
+    const BINS = 24, OUT = DRAGON_FIT.span / 2 + 0.3, hingeX = DRAGON_FIT.hinge[0], lowY = H * DRAGON_FIT.low - pivot;
+    const sum = new Float32Array(BINS), cnt = new Float32Array(BINS), curve = new Float32Array(BINS), v3 = new THREE.Vector3();
+    root.updateMatrixWorld(true); m.traverse(o => { if (o.isSkinnedMesh) o.skeleton.update(); });
+    const at = (o, i, to) => (o.isSkinnedMesh ? o.getVertexPosition(i, to) : to.fromBufferAttribute(o.geometry.attributes.position, i)).applyMatrix4(o.matrixWorld);   // where a point of her really is, bones and all
+    api.at = at;
+    m.traverse(o => { if (!o.isMesh) return; const pa = o.geometry.attributes.position;
+      for (let i = 0; i < pa.count; i++) { tilt.worldToLocal(at(o, i, v3)); const ax = Math.abs(v3.x); if (ax < hingeX || (ax < 2.2 && v3.y < lowY + 0.6)) continue; const k = Math.min(BINS - 1, Math.floor((ax - hingeX) / (OUT - hingeX) * BINS)); sum[k] += v3.y; cnt[k]++; } });
+    let last = 0; for (let k = 0; k < BINS; k++) { if (cnt[k] > 3) last = sum[k] / cnt[k]; curve[k] = last; }      // how high the middle of the wing is, step by step out along it
+    // Her tail is found by walking the surface: the far end of it is the low point furthest (over her skin) from her head, and from that tip
+    // the tail is followed back, slice by slice, until the slices fatten into her body. Each point then knows how far along the tail it is
+    // and where it sits around the middle of it, so the tail can be drawn out straight.
+    const tailU = { uTailBase: { value: new THREE.Vector3() }, uTailDir: { value: new THREE.Vector3(0, -0.3, -1) }, uTailOn: { value: 0 }, uTailT: { value: 0 }, uTailSway: { value: 0 } };
+    m.traverse(o => { if (o.isMesh) o.geometry.setAttribute('aTail', new THREE.BufferAttribute(new Float32Array(o.geometry.attributes.position.count * 4), 4)); });
+    m.traverse(o => {
+      if (!o.isMesh || !o.geometry.index) return;
+      const pa = o.geometry.attributes.position, n = pa.count, P = new Float32Array(n * 3), ids = new Int32Array(n), key = new Map(), rep2 = [];
+      for (let i = 0; i < n; i++) { tilt.worldToLocal(at(o, i, v3)); P[i * 3] = v3.x; P[i * 3 + 1] = v3.y; P[i * 3 + 2] = v3.z; const kk = Math.round(v3.x * 500) + ',' + Math.round(v3.y * 500) + ',' + Math.round(v3.z * 500); let id = key.get(kk); if (id === undefined) { id = rep2.length; key.set(kk, id); rep2.push(i); } ids[i] = id; }
+      const W = rep2.length, adj = Array.from({ length: W }, () => []), ix = o.geometry.index;
+      const link = (a, b) => { if (a !== b && !adj[a].includes(b)) { adj[a].push(b); adj[b].push(a); } };
+      for (let k = 0; k < ix.count; k += 3) { const a = ids[ix.getX(k)], b = ids[ix.getX(k + 1)], c = ids[ix.getX(k + 2)]; link(a, b); link(b, c); link(c, a); }
+      const px = w => P[rep2[w] * 3], py = w => P[rep2[w] * 3 + 1], pz = w => P[rep2[w] * 3 + 2];
+      const walk = from => { const d = new Float32Array(W).fill(1e9), q = [from]; d[from] = 0; for (let h = 0; h < q.length; h++) { const a = q[h]; for (const b of adj[a]) { const nd = d[a] + Math.hypot(px(a) - px(b), py(a) - py(b), pz(a) - pz(b)); if (nd < d[b] - 1e-4) { d[b] = nd; q.push(b); } } } return d; };
+      const hb = api.bones.Head; if (!hb) return; tilt.worldToLocal(hb.bone.getWorldPosition(v3));
+      let head = 0, bd = 1e9; for (let w = 0; w < W; w++) { const dd = Math.hypot(px(w) - v3.x, py(w) - v3.y, pz(w) - v3.z); if (dd < bd) { bd = dd; head = w; } }
+      const dH = walk(head); let tip = -1, far = 0; for (let w = 0; w < W; w++) if (dH[w] < 1e8 && dH[w] > far && Math.abs(px(w)) < 3.2) { far = dH[w]; tip = w; }
+      if (tip < 0) return;
+      const dT = walk(tip), STEP = 0.25, MAXK = 60, cx = new Float32Array(MAXK), cy = new Float32Array(MAXK), cz = new Float32Array(MAXK), cn = new Float32Array(MAXK);
+      for (let w = 0; w < W; w++) { const k = Math.floor(dT[w] / STEP); if (k < MAXK) { cx[k] += px(w); cy[k] += py(w); cz[k] += pz(w); cn[k]++; } }
+      for (let k = 0; k < MAXK; k++) { if (cn[k]) { cx[k] /= cn[k]; cy[k] /= cn[k]; cz[k] /= cn[k]; } else if (k) { cx[k] = cx[k - 1]; cy[k] = cy[k - 1]; cz[k] = cz[k - 1]; } }
+      const rad = new Float32Array(MAXK); for (let w = 0; w < W; w++) { const k = Math.floor(dT[w] / STEP); if (k < MAXK) rad[k] += (px(w) - cx[k]) ** 2 + (py(w) - cy[k]) ** 2 + (pz(w) - cz[k]) ** 2; }
+      let K = 3; for (; K < MAXK; K++) { if (cn[K] && Math.sqrt(rad[K] / cn[K]) > DRAGON_FIT.tailThick) break; }       // where the slices stop being tail
+      if (K < 8) return;
+      // slices renumbered from her body outward, their middles smoothed into one line
+      const C = []; for (let j = 0; j < K; j++) { const k = K - 1 - j; C.push(new THREE.Vector3(cx[k], cy[k], cz[k])); }
+      for (let pass = 0; pass < 2; pass++) for (let j = 1; j < K - 1; j++) C[j].lerp(C[j - 1].clone().add(C[j + 1]).multiplyScalar(0.5), 0.5);
+      const T = C.map((c, j) => C[Math.min(K - 1, j + 1)].clone().sub(C[Math.max(0, j - 1)]).normalize()), S = [], N = [];
+      for (let j = 0; j < K; j++) { const sv = j ? S[j - 1].clone() : new THREE.Vector3(1, 0, 0); sv.addScaledVector(T[j], -sv.dot(T[j])).normalize(); S.push(sv); N.push(sv.clone().cross(T[j])); }
+      const aT = new Float32Array(n * 4);
+      for (let i = 0; i < n; i++) { const w = ids[i], k = Math.floor(dT[w] / STEP); if (k >= K) continue; const j = K - 1 - k; v3.set(P[i * 3], P[i * 3 + 1], P[i * 3 + 2]).sub(C[j]); aT[i * 4] = j * STEP + v3.dot(T[j]); aT[i * 4 + 1] = v3.dot(S[j]); aT[i * 4 + 2] = v3.dot(N[j]); aT[i * 4 + 3] = 1; }
+      o.geometry.setAttribute('aTail', new THREE.BufferAttribute(aT, 4)); tailU.uTailBase.value.copy(C[0]); tailU.uTailOn.value = 1; api.tail = { K, length: K * STEP, base: C[0].clone(), tip: [px(tip), py(tip), pz(tip)], far };
+    });
+    const wing = { ...tailU, uTilt: { value: new THREE.Matrix4() }, uInvTilt: { value: new THREE.Matrix4() }, uFlap: { value: 0 }, uFlat: { value: 1 }, uHinge: { value: new THREE.Vector2(hingeX, H * DRAGON_FIT.hinge[1] - pivot) }, uOut: { value: OUT }, uLow: { value: lowY }, uCurve: { value: Array.from(curve) } };
     m.traverse(o => { if (!o.isMesh) return; o.material.onBeforeCompile = sh => {
       Object.assign(sh.uniforms, wing);
-      sh.vertexShader = 'uniform mat4 uTilt, uInvTilt; uniform float uFlap; uniform vec2 uHinge;\n' + sh.vertexShader.replace('#include <project_vertex>', `
+      sh.vertexShader = 'attribute vec4 aTail; uniform vec3 uTailBase, uTailDir; uniform float uTailOn, uTailT, uTailSway; uniform mat4 uTilt, uInvTilt; uniform float uFlap, uFlat, uOut, uLow; uniform vec2 uHinge; uniform float uCurve[' + BINS + '];\n' + sh.vertexShader.replace('#include <project_vertex>', `
         vec4 tp = uInvTilt * (modelMatrix * vec4(transformed, 1.0));
-        float sd = sign(tp.x), ax = abs(tp.x), wgt = smoothstep(uHinge.x, uHinge.x + 1.2, ax), ang = uFlap * wgt * (0.75 + 0.25 * smoothstep(1.5, 4.5, ax));
-        float dx = ax - uHinge.x, dy = tp.y - uHinge.y, cs = cos(ang), sn = sin(ang);
+        if (aTail.w > 0.5) {
+          vec3 tD = normalize(uTailDir), tS = vec3(1.0, 0.0, 0.0), tN = normalize(cross(tS, tD));
+          float sway = sin(aTail.x * 1.1 - uTailT * 3.0) * 0.07 * aTail.x * uTailSway;
+          tp.xyz = mix(tp.xyz, uTailBase + tD * aTail.x * 0.72 + tS * (aTail.y + sway) + tN * aTail.z, smoothstep(0.0, 0.7, aTail.x) * uTailOn);
+        }
+        float sd = sign(tp.x), ax = abs(tp.x);
+        float wgt = smoothstep(uHinge.x, uHinge.x + 1.0, ax) * max(smoothstep(1.5, 2.3, ax), smoothstep(uLow, uLow + 0.7, tp.y)) * (1.0 - aTail.w);   // wing, and not tail or leg
+        float fb = clamp((ax - uHinge.x) / (uOut - uHinge.x), 0.0, 0.999) * ${BINS}.0 - 0.5, f0 = max(0.0, floor(fb));
+        float mid = mix(uCurve[int(f0)], uCurve[int(min(f0 + 1.0, ${BINS - 1}.0))], clamp(fb - f0, 0.0, 1.0));
+        tp.y = mix(tp.y, uCurve[0] + (ax - uHinge.x) * 0.05 + (tp.y - mid) * 0.3, wgt * uFlat);
+        float ang = uFlap * wgt, dx = ax - uHinge.x, dy = tp.y - uHinge.y, cs = cos(ang), sn = sin(ang);
         tp.x = sd * (uHinge.x + dx * cs - dy * sn); tp.y = uHinge.y + dx * sn + dy * cs;
         vec4 mvPosition = viewMatrix * (uTilt * tp);
         gl_Position = projectionMatrix * mvPosition;`);
     }; o.material.needsUpdate = true; });
-    api.flap = (beat, air, tt) => { tilt.updateMatrixWorld(true); wing.uTilt.value.copy(tilt.matrixWorld); wing.uInvTilt.value.copy(tilt.matrixWorld).invert(); wing.uFlap.value = air * (0.08 + 0.5 * beat) + (1 - air) * (-0.12 + 0.04 * Math.sin(tt * 1.3)); };
+    api.wing = wing;
+    const tX = new THREE.Vector3(1, 0, 0);
+    api.flap = (beat, air, tt) => { wing.uTailDir.value.set(0, -0.28 + 0.2 * air, -1).applyAxisAngle(tX, -tilt.rotation.x); wing.uTailT.value = tt; wing.uTailSway.value = 0.25 + 0.75 * air; tilt.updateMatrixWorld(true); wing.uTilt.value.copy(tilt.matrixWorld); wing.uInvTilt.value.copy(tilt.matrixWorld).invert(); wing.uFlap.value = air * (0.06 + 0.6 * beat) + (1 - air) * (0.2 + 0.05 * Math.sin(tt * 1.3)); };
     api.seat = { y: H * DRAGON_FIT.seat[0] - pivot, z: L * DRAGON_FIT.seat[1] };
     const mo = new THREE.Object3D(); mo.position.set(0, H * DRAGON_FIT.mouth[0] - pivot, L * DRAGON_FIT.mouth[1]); tilt.add(mo); api.mouth = mo;
     let tt = 0, air = 0, ph = 0, glide = 0;
