@@ -292,7 +292,7 @@ function rideLimbs() {
     }
   } else if (k === 'dragon') {                                 // astride its shoulders, holding on, leaning with it
     const lean = Math.min(1, Math.hypot(e.vx, e.vz) / 10); kid.group.rotation.x = 0.22 * lean; kid.group.updateMatrixWorld(true); kid.group.getWorldQuaternion(sitQ);
-    for (const [side, sx, ph] of LR) { leg(side, sx, [0.8, -0.35, 0.9], [0.2, -1, -0.1 + 0.08 * Math.sin(t * 2 + ph)]); arm(side, sx, [0.3, -0.6, 0.75], [-0.12, -0.35 + 0.05 * Math.sin(t * 6 + ph) * lean, 1]); }
+    for (const [side, sx, ph] of LR) { leg(side, sx, [0.6, -0.45, 0.9], [0.14, -1, -0.1 + 0.08 * Math.sin(t * 2 + ph)]); arm(side, sx, [0.3, -0.6, 0.75], [-0.12, -0.35 + 0.05 * Math.sin(t * 6 + ph) * lean, 1]); }
   } else if (k === 'sand') {                                   // patting the sand into shape, one hand then the other
     for (const [side, sx, ph] of LR) { const pat = 0.5 + 0.5 * Math.sin(t * 6.5 + ph); arm(side, sx, [0.3, -0.72 + 0.22 * pat, 0.6], [0.0, -0.62 + 0.7 * pat, 0.75]); leg(side, sx, [0.22, -0.3, 1], [0.1, -0.5 + 0.07 * Math.sin(t * 3 + ph), 1]); }
   }
@@ -1463,11 +1463,12 @@ function updateHills(dt) {
   }
 }
 
+const SELF_FLIGHT = false;                                  // the kid flies only on her dragon now; true lets her flap into the air herself again
 function jump() {
   if (player.ride === 'dragon') { if (state !== 'play') return false; play.dragon.vy = 7.6; sfx.whoosh(0.2); return true; }   // a beat of the wings
   if (player.ride) { playerDismount(); return true; }
   if (player.perch) { leavePerch(true); return true; }
-  if (HERO.fly && player.y > 0.01) {
+  if (SELF_FLIGHT && HERO.fly && player.y > 0.01) {
     if (state !== 'play' || player.y > 18) return false;
     player.vy = 6.4; player.flying = true; sfx.whoosh(0.15); fireflies(player.x, player.g + player.y + 0.6, player.z, 6, false);
     return true;
