@@ -335,15 +335,22 @@ const HAIR_DYE = [0, 0, 0, 0];                                // the sum of ever
 function shoeBows(root) {
   root.updateMatrixWorld(true);
   const find = n => { let b = null; root.traverse(o => { if (o.isBone && o.name.replace(/^mixamorig:?/, '') === n) b = o; }); return b; };
-  const silk = new THREE.MeshStandardMaterial({ color: 0xd9c2ff, roughness: 0.3, metalness: 0.25 }), pearl = new THREE.MeshStandardMaterial({ color: 0xfff6ff, roughness: 0.15, metalness: 0.4 });
+  const silk = new THREE.MeshStandardMaterial({ color: 0xc98be6, roughness: 0.34, metalness: 0.18, side: THREE.DoubleSide }), pearl = new THREE.MeshStandardMaterial({ color: 0xb070d6, roughness: 0.34, metalness: 0.18 });   // lavender ribbon; the knot a shade deeper
   for (const side of ['Left', 'Right']) {
     const foot = find(side + 'Foot'), toe = find(side + 'ToeBase'); if (!foot || !toe) continue;
     const f = foot.getWorldPosition(new THREE.Vector3()), t = toe.getWorldPosition(new THREE.Vector3()), fwd = t.clone().sub(f); fwd.y = 0; fwd.normalize();
     const sc = root.getWorldScale(new THREE.Vector3()).y / 1.9, bow = new THREE.Group();          // sized for her at her usual size
-    for (const sx of [-1, 1]) { const loop = new THREE.Mesh(new THREE.SphereGeometry(1, 12, 8), silk); loop.scale.set(0.034, 0.02, 0.014); loop.position.set(sx * 0.033, 0, 0); loop.rotation.z = sx * 0.35; loop.castShadow = true; bow.add(loop);
-      const tail = new THREE.Mesh(new THREE.SphereGeometry(1, 8, 6), silk); tail.scale.set(0.012, 0.026, 0.008); tail.position.set(sx * 0.018, -0.024, 0.004); tail.rotation.z = -sx * 0.5; bow.add(tail); }
-    const gem = new THREE.Mesh(new THREE.SphereGeometry(0.014, 12, 8), pearl); gem.position.z = 0.006; bow.add(gem);
-    bow.scale.setScalar(sc * 0.85); bow.position.copy(t).addScaledVector(fwd, BOW.fwd * sc); bow.position.y += BOW.up * sc;
+    // a ribbon bow: two full loops, a wrapped knot, and two tails falling away with notched ends
+    for (const sx of [-1, 1]) {
+      const lp = new THREE.Shape(); lp.moveTo(0, 0); lp.bezierCurveTo(0.012, 0.036, 0.062, 0.046, 0.07, 0.01); lp.bezierCurveTo(0.074, -0.024, 0.022, -0.03, 0, 0);
+      const lg = new THREE.ExtrudeGeometry(lp, { depth: 0.004, bevelEnabled: false, curveSegments: 14 }), pp = lg.attributes.position;
+      for (let k = 0; k < pp.count; k++) pp.setZ(k, pp.getZ(k) + Math.sin(Math.min(1, pp.getX(k) / 0.064) * Math.PI) * 0.014);     // each loop puffs out from the knot and back
+      lg.computeVertexNormals(); const loop = new THREE.Mesh(lg, silk); loop.scale.x = sx; loop.rotation.z = sx * 0.12; loop.castShadow = true; bow.add(loop);
+      const tl = new THREE.Shape(); tl.moveTo(-0.004, 0); tl.lineTo(0.016, 0); tl.lineTo(0.054, -0.044); tl.lineTo(0.036, -0.042); tl.lineTo(0.022, -0.058); tl.closePath();
+      const tail = new THREE.Mesh(new THREE.ExtrudeGeometry(tl, { depth: 0.003, bevelEnabled: false }), silk); tail.scale.x = sx; tail.position.z = -0.004; tail.castShadow = true; bow.add(tail);
+    }
+    const gem = new THREE.Mesh(new THREE.SphereGeometry(1, 12, 8), pearl); gem.scale.set(0.011, 0.014, 0.012); gem.position.z = 0.006; bow.add(gem);
+    bow.scale.setScalar(sc * 0.8); bow.position.copy(t).addScaledVector(fwd, BOW.fwd * sc); bow.position.y += BOW.up * sc;
     bow.lookAt(bow.position.clone().add(fwd).add(new THREE.Vector3(0, 0.9, 0)));                    // facing up and forward, lying on the slope of the toe
     bow.updateMatrixWorld(true); toe.attach(bow);
   }
