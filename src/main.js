@@ -291,17 +291,27 @@ function dressKid(root) {
   const cv = document.createElement('canvas'), mk = document.createElement('canvas'); cv.width = mk.width = W; cv.height = mk.height = H;
   const g = cv.getContext('2d', { willReadFrequently: true }), m = mk.getContext('2d', { willReadFrequently: true }); g.drawImage(img, 0, 0, W, H);
   m.fillStyle = '#000'; m.fillRect(0, 0, W, H); m.globalCompositeOperation = 'lighter'; m.lineWidth = 3 * UPS; m.lineJoin = 'round';
-  const v = new THREE.Vector3(), hgt = [], out = [], n = ix ? ix.count : pos.count;
-  for (let i = 0; i < pos.count; i++) { v.fromBufferAttribute(pos, i); hgt.push(v.clone().sub(foot).dot(up) / span); out.push(Math.abs(v.sub(hips).dot(side)) / span); }
+  const hc = document.createElement('canvas'); hc.width = W; hc.height = H; const hm = hc.getContext('2d', { willReadFrequently: true });   // how far down her hair each bit of the picture is
+  hm.fillStyle = '#000'; hm.fillRect(0, 0, W, H); hm.globalCompositeOperation = 'lighten'; hm.lineWidth = 2 * UPS; hm.lineJoin = 'round';
+  const toe = at('LeftToeBase'), fwd = new THREE.Vector3().crossVectors(side, up).normalize(); if (toe && toe.clone().sub(lf).dot(fwd) < 0) fwd.negate();
+  const v = new THREE.Vector3(), hgt = [], out = [], dep = [], n = ix ? ix.count : pos.count;
+  for (let i = 0; i < pos.count; i++) { v.fromBufferAttribute(pos, i); hgt.push(v.clone().sub(foot).dot(up) / span); dep.push(v.clone().sub(head).dot(fwd) / span); out.push(Math.abs(v.sub(hips).dot(side)) / span); }
   for (let k = 0; k < n; k += 3) {
     const a = ix ? ix.getX(k) : k, b = ix ? ix.getX(k + 1) : k + 1, c = ix ? ix.getX(k + 2) : k + 2, h = (hgt[a] + hgt[b] + hgt[c]) / 3, o = (out[a] + out[b] + out[c]) / 3;
+    const face = h > 0.93 && o < 0.055 && (dep[a] + dep[b] + dep[c]) / 3 > 0;                               // eyes, brows and mouth are dark too, and stay as they are
+    const tips = h > 0.76 && o < 0.3 && !face ? Math.pow(Math.min(1, Math.max(0, (1.075 - h) / 0.2)), 1.3) : 0;   // black at the roots, fading to purple down the length                     // the lower lengths of her hair
+    if (tips > 0) { const q8 = Math.round(tips * 255); hm.fillStyle = hm.strokeStyle = 'rgb(' + q8 + ',' + q8 + ',' + q8 + ')'; hm.beginPath(); for (const q of [a, b, c]) { const x = uv.getX(q) * W, y = (map.flipY ? 1 - uv.getY(q) : uv.getY(q)) * H; q === a ? hm.moveTo(x, y) : hm.lineTo(x, y); } hm.closePath(); hm.fill(); hm.stroke(); }
     const skirt = h > 0.25 && h < 0.66 && o < 0.26, bodice = h > 0.58 && h < 0.965 && o < 0.225; if (!skirt && !bodice) continue;
     const belt = !skirt && h < 0.76 && o < 0.2;                  // the band at her waist, just above where the skirt starts
     m.fillStyle = m.strokeStyle = 'rgb(' + (skirt ? 255 : 0) + ',' + (bodice ? 255 : 0) + ',' + (belt ? 255 : 0) + ')';
     m.beginPath(); for (const q of [a, b, c]) { const x = uv.getX(q) * W, y = (map.flipY ? 1 - uv.getY(q) : uv.getY(q)) * H; q === a ? m.moveTo(x, y) : m.lineTo(x, y); } m.closePath(); m.fill(); m.stroke();
   }
-  const px = g.getImageData(0, 0, W, H), mp = m.getImageData(0, 0, W, H).data, d = px.data;
+  const px = g.getImageData(0, 0, W, H), mp = m.getImageData(0, 0, W, H).data, hp = hm.getImageData(0, 0, W, H).data, d = px.data;
   for (let i = 0; i < d.length; i += 4) {
+    if (hp[i] > 8 && !(mp[i + 2] > 128)) {                   // hair is the dark there: dyed purple toward the ends, the strands kept
+      const mx0 = Math.max(d[i], d[i + 1], d[i + 2]), mn0 = Math.min(d[i], d[i + 1], d[i + 2]);
+      if (mx0 < 84 && mx0 - mn0 < 30) { const k = hp[i] / 255, L0 = (d[i] + d[i + 1] + d[i + 2]) / 765; d[i] += (Math.min(255, 128 + 560 * L0) - d[i]) * k; d[i + 1] += (Math.min(255, 52 + 340 * L0) - d[i + 1]) * k; d[i + 2] += (Math.min(255, 226 + 200 * L0) - d[i + 2]) * k; continue; }
+    }
     const skirt = mp[i] > 128, bodice = mp[i + 1] > 128; if (!skirt && !bodice) continue;
     const r = d[i], gg = d[i + 1], b = d[i + 2], mx = Math.max(r, gg, b), mn = Math.min(r, gg, b), L = (r + gg + b) / 765, cloth = mx < 62 || (mx - mn) / mx < 0.2;
     if (!cloth) continue;                                    // skin
