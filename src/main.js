@@ -336,6 +336,7 @@ function shoeBows(root) {
   root.updateMatrixWorld(true);
   const find = n => { let b = null; root.traverse(o => { if (o.isBone && o.name.replace(/^mixamorig:?/, '') === n) b = o; }); return b; };
   const silk = new THREE.MeshStandardMaterial({ color: 0xc98be6, roughness: 0.34, metalness: 0.18, side: THREE.DoubleSide }), pearl = new THREE.MeshStandardMaterial({ color: 0xb070d6, roughness: 0.34, metalness: 0.18 });   // lavender ribbon; the knot a shade deeper
+  let proto = null;
   for (const side of ['Left', 'Right']) {
     const foot = find(side + 'Foot'), toe = find(side + 'ToeBase'); if (!foot || !toe) continue;
     const f = foot.getWorldPosition(new THREE.Vector3()), t = toe.getWorldPosition(new THREE.Vector3()), fwd = t.clone().sub(f); fwd.y = 0; fwd.normalize();
@@ -350,11 +351,21 @@ function shoeBows(root) {
       const tail = new THREE.Mesh(new THREE.ExtrudeGeometry(tl, { depth: 0.003, bevelEnabled: false }), silk); tail.scale.x = sx; tail.position.z = -0.004; tail.castShadow = true; bow.add(tail);
     }
     const gem = new THREE.Mesh(new THREE.SphereGeometry(1, 12, 8), pearl); gem.scale.set(0.011, 0.014, 0.012); gem.position.z = 0.006; bow.add(gem);
+    if (!proto) proto = bow.clone();
     bow.scale.setScalar(sc * 0.8); bow.position.copy(t).addScaledVector(fwd, BOW.fwd * sc); bow.position.y += BOW.up * sc;
     bow.lookAt(bow.position.clone().add(fwd).add(new THREE.Vector3(0, 0.9, 0)));                    // facing up and forward, lying on the slope of the toe
     bow.updateMatrixWorld(true); toe.attach(bow);
   }
+  // the same bow again, larger, tied at the side of her belt
+  const spine = find('Spine'), lu = find('LeftUpLeg'), ru = find('RightUpLeg'), lfB = find('LeftFoot'), ltB = find('LeftToeBase');
+  if (proto && spine && lu && ru && lfB && ltB) {
+    const W = o => o.getWorldPosition(new THREE.Vector3()), sideV = W(lu).sub(W(ru)).setY(0).normalize(), fwd = W(ltB).sub(W(lfB)).setY(0).normalize(), sc = root.getWorldScale(new THREE.Vector3()).y / 1.9;
+    proto.scale.setScalar(sc * BELT_BOW.size); proto.position.copy(W(spine)).addScaledVector(sideV, BELT_BOW.side * sc).addScaledVector(fwd, BELT_BOW.fwd * sc); proto.position.y += BELT_BOW.up * sc;
+    proto.lookAt(proto.position.clone().addScaledVector(sideV, 0.72).addScaledVector(fwd, 0.7));          // facing out from her hip, half to the side and half to the front
+    proto.updateMatrixWorld(true); spine.attach(proto);
+  }
 }
+const BELT_BOW = { up: 0.058, side: 0.12, fwd: 0.125, size: 1.35 };   // where it sits from the bottom of her spine, in metres at her own size
 const BOW = { up: 0.052, fwd: -0.012 };                        // where the bow sits from the joint of her toes, in metres at her own size
 const SHOE = { side: 0.33, vamp: 0.64, rise: 0.85, heel: 0.4, strap: 0.4, strapW: 0.058 };   // the cut of the shoe: side height, where the toe cover starts and how far it rises, heel height, the strap
 const SHOE_TOP = 0.03;                                       // how far above her ankles her shoes come, as a part of her height
