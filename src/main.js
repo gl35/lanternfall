@@ -255,7 +255,7 @@ function hairUpdate(C, parent, bones, flow, T) {
     for (let r = 0; r <= HAIR.ROWS; r++) for (let q = 0; q <= HAIR.COLS; q++) {
       const t = r / HAIR.ROWS, k = r * (HAIR.COLS + 1) + q, lock = 0.86 + 0.28 * (((q * 7919) % 13) / 13);                     // each lock a shade of its own
       if (HAIR_DYE[3]) c.setRGB(HAIR_DYE[0] / HAIR_DYE[3] / 255, HAIR_DYE[1] / HAIR_DYE[3] / 255, HAIR_DYE[2] / HAIR_DYE[3] / 255, THREE.SRGBColorSpace); else c.setRGB(0.55, 0.24, 0.9, THREE.SRGBColorSpace);
-      c.multiplyScalar(HAIR_TONE * 1.25); c.toArray(col, k * 3);
+      c.multiplyScalar(HAIR_TONE * (0.95 + 0.3 * Math.min(1, t / 0.35))); c.toArray(col, k * 3);
       uv[k * 2] = q / HAIR.COLS * 1.5; uv[k * 2 + 1] = t;
       if (r < HAIR.ROWS && q < HAIR.COLS) { const b = k + HAIR.COLS + 1; idx.push(k, k + 1, b, k + 1, b + 1, b); }
     }
@@ -266,7 +266,7 @@ function hairUpdate(C, parent, bones, flow, T) {
     for (let x = 0; x < 512;) {
       const w = 1 + Math.floor(rn() * 3), len = (rn() < 0.12 ? 0.62 + rn() * 0.2 : 0.86 + rn() * 0.14) * 256, v = Math.round(255 * (rn() < 0.16 ? 0.38 + rn() * 0.2 : rn() < 0.1 ? 1 : 0.62 + rn() * 0.3));
       const gr = x2.createLinearGradient(0, 0, 0, len); gr.addColorStop(0, 'rgb(' + v + ',' + v + ',' + v + ')'); gr.addColorStop(0.5 + rn() * 0.3, 'rgb(' + Math.min(255, v + 26) + ',' + Math.min(255, v + 26) + ',' + Math.min(255, v + 26) + ')'); gr.addColorStop(1, 'rgb(' + Math.round(v * 0.8) + ',' + Math.round(v * 0.8) + ',' + Math.round(v * 0.8) + ')');
-      x2.fillStyle = gr; x2.fillRect(x, 0, w, len); x += w;
+      const y0 = rn() < 0.25 ? 0 : rn() * 0.2 * 256; x2.fillStyle = gr; x2.fillRect(x, y0, w, len - y0); x += w;
     }
     x2.globalCompositeOperation = 'destination-out';         // partings: slits of nothing between locks, wider toward the tips
     for (let x = 6 + rn() * 10; x < 512; x += 9 + rn() * 16) { const top = (0.3 + rn() * 0.4) * 256; x2.beginPath(); x2.moveTo(x, top); x2.lineTo(x - 1.2 - rn() * 1.6, 256); x2.lineTo(x + 1.2 + rn() * 1.6, 256); x2.closePath(); x2.fill(); }
@@ -275,14 +275,14 @@ function hairUpdate(C, parent, bones, flow, T) {
     C.mesh.castShadow = true; C.mesh.frustumCulled = false; parent.add(C.mesh);
   }
   C.mesh.position.copy(cloakP);
-  const N = C.N, u = N / 1.53, L = 0.44 * u, p = C.mesh.geometry.attributes.position, bk = C.back;       // u: her own size, with the measures below taken from her model
+  const N = C.N, u = N / 1.53, L = 0.48 * u, p = C.mesh.geometry.attributes.position, bk = C.back;       // u: her own size, with the measures below taken from her model
   for (let r = 0; r <= HAIR.ROWS; r++) for (let q = 0; q <= HAIR.COLS; q++) {
     const t = r / HAIR.ROWS, cc = q / HAIR.COLS * 2 - 1, k = t * L, e = t * t * (3 - 2 * t);
-    const ang = cc * (1.5 - 0.5 * e), rx = (0.215 - 0.08 * e) * u, rz = (0.145 - 0.045 * e) * u, ends = r === HAIR.ROWS ? (((q * 31) % 7) / 7) * 0.05 * L : 0;
+    const ang = cc * (1.5 - 0.5 * e), rx = (0.228 - 0.093 * e) * u, rz = (0.163 - 0.063 * e) * u, ends = r === HAIR.ROWS ? (((q * 31) % 7) / 7) * 0.05 * L : 0;
     const wave = Math.sin(T * 2.6 + t * 3.6 + cc * 1.9) * 0.018 + Math.sin(T * 1.5 + cc * 2.4) * 0.009;
     p.setXYZ(r * (HAIR.COLS + 1) + q,
       Math.sin(ang) * rx + Math.sin(T * 1.9 + t * 3) * 0.012 * k * (1 + flow),
-      -0.075 * u - k - ends + flow * 0.14 * t * k,
+      -0.035 * u - k - ends + flow * 0.14 * t * k,
       bk * (Math.cos(ang) * rz + (wave + flow * 0.4 * t) * k));
   }
   p.needsUpdate = true; C.mesh.geometry.computeVertexNormals();
