@@ -4,7 +4,7 @@ import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeom
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
-import { buildScenery, softTexture, R, START, TREES, WOODS, ROAM, hillHeight, VALLEY, valleyAt, PLAYGROUND, CASTLE, BAY, valley2At, RIVER, riverAt } from './scenery.js';
+import { buildScenery, softTexture, R, START, TREES, WOODS, ROAM, hillHeight, VALLEY, valleyAt, PLAYGROUND, CASTLE, BAY, valley2At, RIVER, riverAt, riverUV } from './scenery.js';
 import { buildCastle } from './castle.js';
 import { sfx } from './audio.js';
 
@@ -243,6 +243,7 @@ const kidE = new THREE.Euler(), kidQ = new THREE.Quaternion(), kidQ2 = new THREE
 function kidPose() {
   for (const n in kid.pose) { const b = kid.bones[n]; if (!b) continue; const [x, y, z] = kid.pose[n]; b.bone.quaternion.copy(b.bind).multiply(kidQ.setFromEuler(kidE.set(x * D2R, y * D2R, z * D2R))); }
 }
+const rideA = new THREE.Vector3(), rideB = new THREE.Vector3(), rideC = new THREE.Vector3();
 // What her arms and legs do on each ride. Plain turns for the simple swings of a limb, aimed bones where a limb has to point somewhere.
 function rideLimbs() {
   const k = kid.ride, e = play[k], B = kid.bones, t = time, LR = [['Left', -1, 0], ['Right', 1, Math.PI]];
@@ -273,6 +274,20 @@ function rideLimbs() {
       const a = Math.sin(e.tt * 2.6 + ph), b = Math.sin(e.tt * 2.6 + ph + Math.PI), b2 = Math.sin(e.tt * 2.6 + ph + Math.PI - 0.8);
       arm(side, sx, [0.16, 1, 0.34 * a], [0.04, 1, 0.14 * a]); leg(side, sx, [0.07, -1, 0.3 * b], [0.04, -1, -0.3 + 0.26 * b2]);
     }
+  } else if (k === 'boat') {                                   // rowing: she leans to the catch and back to the finish, a hand on each oar, feet braced
+    const c = Math.cos(e.phase); kid.group.rotation.x = -0.2 * c; kid.group.updateMatrixWorld(true); kid.group.getWorldQuaternion(sitQ);
+    for (const [side, sx] of LR) {
+      const A = B[side + 'Arm'], F = B[side + 'ForeArm'], Hd = B[side + 'Hand'];
+      if (A && F && Hd) {
+        free(side + 'Arm'); free(side + 'ForeArm');
+        A.bone.getWorldPosition(rideA); let best = null, bd = 1e9;
+        for (const o of e.oars) { o.g.getWorldPosition(rideB); const dd = rideB.distanceTo(rideA); if (dd < bd) { bd = dd; best = o; } }
+        best.g.getWorldPosition(rideB); const near = Math.min(1, Math.max(0, 1 - bd / 0.55));
+        aimBone(A.bone, F.bone, rideC.copy(rideB).sub(rideA).normalize().addScaledVector(ROW_UP, -1.1 * near).normalize(), 1);   // elbows drop as the handle comes in to her
+        F.bone.getWorldPosition(rideA); aimBone(F.bone, Hd.bone, rideC.copy(rideB).sub(rideA).normalize(), 1);
+      }
+      leg(side, sx, [0.14, -0.14 + 0.1 * c, 1], [0.05, -0.55 - 0.2 * c, 0.85]);
+    }
   } else if (k === 'sand') {                                   // patting the sand into shape, one hand then the other
     for (const [side, sx, ph] of LR) { const pat = 0.5 + 0.5 * Math.sin(t * 6.5 + ph); arm(side, sx, [0.3, -0.72 + 0.22 * pat, 0.6], [0.0, -0.62 + 0.7 * pat, 0.75]); leg(side, sx, [0.22, -0.3, 1], [0.1, -0.5 + 0.07 * Math.sin(t * 3 + ph), 1]); }
   }
@@ -293,7 +308,7 @@ function kidDismount() {
   if (e.exit) { kid.x = e.exit.x; kid.z = e.exit.z; }
   else if (kid.ride === 'round') { const p = kid.group.getWorldPosition(new THREE.Vector3()), d = Math.hypot(p.x - e.x, p.z - e.z) || 1; kid.x = e.x + (p.x - e.x) / d * 2.5; kid.z = e.z + (p.z - e.z) / d * 2.5; kid.face = Math.atan2(p.x - e.x, p.z - e.z); }
   for (const n in kid.bones) { const b = kid.bones[n]; b.bone.quaternion.copy(b.bind); }
-  kid.pose = null; kid.ride = null; scene.add(kid.group);
+  kid.pose = null; kid.ride = null; scene.add(kid.group); kid.group.traverse(o => { o.renderOrder = 0; });
   kid.group.rotation.order = 'XYZ'; kid.group.rotation.set(0, kid.face, 0); kid.group.position.set(kid.x, hillHeight(kid.x, kid.z), kid.z);
   kid.mode = 'wait'; kid.t = Math.min(1.4, kidPlay('jump', true, 1.3));
 }
@@ -986,7 +1001,7 @@ const play = { swing: null, hammock: null, spots: [] };
           part(new THREE.TorusGeometry(0.04, 0.012, 6, 12), MAT.dark, inboard - 0.11).rotation.x = Math.PI / 2;
           part(new THREE.CylinderGeometry(0.115, 0.03, 0.68, 16), pale, len - 0.34).scale.z = 0.13;    // the blade
           part(new THREE.CylinderGeometry(0.117, 0.117, 0.035, 16), new THREE.MeshStandardMaterial({ color: COLS[0], roughness: 0.8 }), len - 0.02).scale.z = 0.14;   // its painted tip
-          boat.add(oar);
+          boat.add(oar); (boat.userData.oars ||= []).push({ g: oar, side, at, inboard });
         }
         // the painter: made fast to a ring on the stem and coiled down in the bow
         { const ring = new THREE.Mesh(new THREE.TorusGeometry(0.04, 0.009, 6, 12), iron); ring.position.set(0, gunY(1) - 0.02, zAt(1, 0.9) - 0.03); boat.add(ring);
@@ -1008,15 +1023,19 @@ const play = { swing: null, hammock: null, spots: [] };
       }
       const bank = (u, lat) => { const p = riverAt(u, lat); return V(p.x, hillHeight(p.x, p.z), p.z); };
       const SEA = BAY.level > -50;                              // the boat, windbreak and sandcastle belong to a shore: with no sea they stay away
-      if (SEA) { const bp = riverAt(-9, 0.4); boat.position.set(bp.x, BAY.level + 0.12, bp.z); boat.rotation.y = Math.atan2(RIVER.ax, RIVER.az) + 0.3; scene.add(boat); play.deco.push({ kind: 'boat', o: boat, ph: 1.3, x: bp.x, z: bp.z }); }
+      if (SEA) { const bp = riverAt(-9, 0.4); boat.position.set(bp.x, BAY.level + 0.12, bp.z); boat.rotation.y = Math.atan2(RIVER.ax, RIVER.az) + 0.3; scene.add(boat); play.deco.push({ kind: 'boat', o: boat, ph: 1.3, x: bp.x, z: bp.z });
+        play.boat = { x: bp.x, z: bp.z, g: boat, r: 1.5, seat: boat, rider: false, pose: KID_POSE.hold, v: 0, phase: -1.9, oars: boat.userData.oars,
+          put(k) { k.position.set(0, 0.07 - 0.86, -0.3); k.rotation.set(0, Math.PI, 0); this.v = 0; camYaw = Math.PI - boat.rotation.y; k.traverse(o => { o.renderOrder = -2; }); },   // on the middle thwart, facing aft as a rower does
+          get exit() { const q = riverUV(boat.position.x, boat.position.z); return riverAt(q.u, (q.lat < 0 ? -1 : 1) * 6.2); } };          // she steps out onto the nearer bank
+      }
       for (const [da, r, len, turn] of [[15, 8.5, 3.2, 0.4], [-22, -9, 2.2, 1.9], [31, -8.5, 2.6, 2.6]]) {
         const p = bank(da, r), a = turn, log = bar(V(p.x - Math.cos(a) * len / 2, p.y + 0.16, p.z - Math.sin(a) * len / 2), V(p.x + Math.cos(a) * len / 2, p.y + 0.2, p.z + Math.sin(a) * len / 2), 0.17, MAT.wood); scene.add(log);
         play.spots.push({ x: p.x, z: p.z, r: 0.7 });
       }
-      for (let k = 0; k < 30; k++) { const p = bank((k * 0.618 % 1 - 0.5) * 88, (k % 2 ? 1 : -1) * (3.3 + (k * 0.37 % 1) * 2.8)), st = new THREE.Mesh(sphereGeo, MAT.stone); const sz = 0.16 + (k * 0.29 % 1) * 0.3; st.scale.set(sz * 1.4, sz * 0.6, sz); st.position.set(p.x, p.y + sz * 0.2, p.z); st.rotation.y = k; st.castShadow = true; scene.add(st); }
+      for (let k = 0; k < 70; k++) { const p = bank((k * 0.618 % 1 - 0.5) * 2 * (RIVER.len - 16), (k % 2 ? 1 : -1) * (3.3 + (k * 0.37 % 1) * 2.8)), st = new THREE.Mesh(sphereGeo, MAT.stone); const sz = 0.16 + (k * 0.29 % 1) * 0.3; st.scale.set(sz * 1.4, sz * 0.6, sz); st.position.set(p.x, p.y + sz * 0.2, p.z); st.rotation.y = k; st.castShadow = true; scene.add(st); }
       // a windbreak: striped cloth between three poles
       for (const end of [-1, 1]) for (let k = 0; k < 11; k++) {     // tumbled boulders where the river comes out of the hill and where it goes back in
-        const p = bank(end * (39 + (k * 0.47 % 1) * 7), ((k * 0.618) % 1 - 0.5) * 10), sz = 0.7 + (k * 0.29 % 1) * 1.3, st = new THREE.Mesh(sphereGeo, MAT.stone);
+        const p = bank(end * (RIVER.len - 13 + (k * 0.47 % 1) * 9), ((k * 0.618) % 1 - 0.5) * 11), sz = 0.7 + (k * 0.29 % 1) * 1.3, st = new THREE.Mesh(sphereGeo, MAT.stone);
         st.scale.set(sz * 1.2, sz * 0.8, sz); st.position.set(p.x, Math.max(p.y, RIVER.level) + sz * 0.15, p.z); st.rotation.set(k * 0.7, k * 1.3, k * 0.4); st.castShadow = st.receiveShadow = true; scene.add(st);
       }
       if (BAY.sand) { const p0 = on(toMeadow - 0.12, 38.2), p1 = on(toMeadow + 0.02, 38.6), p2 = on(toMeadow + 0.14, 38);
@@ -1033,7 +1052,20 @@ const play = { swing: null, hammock: null, spots: [] };
   }
   play.field = at(0, 0);
 }
-const RIDES = ['swing', 'hammock', 'round', 'seesaw', 'slide', 'bars', 'sand'];
+const RIDES = ['swing', 'hammock', 'round', 'seesaw', 'slide', 'bars', 'sand', 'boat'];
+// Rowing: the stick forward pulls her along bow first, sideways brings the bow round, back paddles her astern. The jump button steps out.
+const ROW_UP = new THREE.Vector3(0, 1, 0), rowDir = new THREE.Vector3();
+function rowBoat(dt, jx, jy, l) {
+  const e = play.boat, b = e.g, afloat = (x, z) => hillHeight(x, z) < RIVER.level - 0.32;
+  if (l > 0.12) camYaw += jx * 0.9 * dt;
+  const want = l > 0.12 ? (jy < 0 ? -jy * 3.4 : -jy * 1.3) : 0; e.v += (want - e.v) * Math.min(1, dt * 1.5);
+  let dh = Math.PI - camYaw - b.rotation.y; dh = Math.atan2(Math.sin(dh), Math.cos(dh)); b.rotation.y += dh * Math.min(1, dt * 2.4);
+  const sx = Math.sin(b.rotation.y), sz = Math.cos(b.rotation.y), nx = b.position.x + sx * e.v * dt, nz = b.position.z + sz * e.v * dt, lead = Math.sign(e.v) * 1.7;
+  if (afloat(nx, nz) && afloat(nx + sx * lead, nz + sz * lead) && Math.abs(riverUV(nx, nz).u) < RIVER.len - 16) { b.position.x = nx; b.position.z = nz; } else e.v *= 0.6;   // she cannot row up the bank
+  if (Math.abs(e.v) > 0.12) e.phase += dt * Math.sign(e.v) * (1.6 + Math.abs(e.v) * 0.9);
+  if (Math.abs(e.v) > 1 && Math.random() < dt * 9) spawn(b.position.x - sx * 1.9 + rnd(0.5), BAY.level + 0.05, b.position.z - sz * 1.9 + rnd(0.5), rnd(0.6), 0.5 + Math.random(), rnd(0.6), 0.5, 0.07, { color: 0xeaf7ff, g: 7 });
+  e.x = player.x = b.position.x; e.z = player.z = b.position.z; player.g = BAY.level + 0.15; player.moving = 0;
+}
 function updatePlay(dt) {
   {
     const rd = play.round, ss = play.seesaw, sl = play.slide;
@@ -1047,6 +1079,10 @@ function updatePlay(dt) {
         d.o.rotation.x = 0.04 + Math.min(1.2, g2 * 0.8) + Math.sin(wt * 4.6 + d.ph) * 0.1 * (0.2 + gust);
         const p = d.f.geometry.attributes.position; for (let k = 0; k < p.count; k++) { const t = -p.getY(k) / 0.92; p.setZ(k, Math.sin(t * 4.2 - wt * 7 + d.ph) * 0.07 * t * (0.25 + gust)); } p.needsUpdate = true;
       }
+    }
+    if (play.boat) for (const o of play.boat.oars) {         // each oar turns on its rowlock: blade down for the pull, lifted clear to come back
+      const ph = play.boat.phase; rowDir.set(o.side, -0.18 - 0.09 * Math.sin(ph), 0.5 * Math.cos(ph)).normalize();
+      o.g.position.copy(o.at).addScaledVector(rowDir, -o.inboard); o.g.quaternion.setFromUnitVectors(ROW_UP, rowDir);
     }
     const mb = play.bars, sd = play.sand;
     if (mb.rider) {                                          // along the rungs and back to the middle of the far end, body swinging under her hands
@@ -1415,6 +1451,7 @@ function movePlayer(dt) {
   if (window.__joy) { jx = window.__joy.x; jy = window.__joy.y; }
   let l = Math.hypot(jx, jy); if (l > 1) { jx /= l; jy /= l; l = 1; }
   if (state !== 'play') l = jx = jy = 0;
+  if (player.ride === 'boat') { rowBoat(dt, jx, jy, l); return; }
   if (player.ride) {
     if (l < 0.12) player.rideFree = true;
     else if (player.rideFree) playerDismount();
@@ -1451,7 +1488,8 @@ function movePlayer(dt) {
     castle.resolve(player, feet, HERO.mount ? 1.2 : 0.45);
     let g2 = castle.groundAt(player.x, player.z, feet);
     const wasSwim = player.swim; player.swim = false;
-    if (Math.hypot(player.x - BAY.x, player.z - BAY.z) < BAY.r) {
+    const rq = riverUV(player.x, player.z);
+    if (Math.abs(rq.u) < RIVER.len && Math.abs(rq.lat) < 8) {
       if (heroIx === KID && g2 < BAY.level - (wasSwim ? 0.75 : 0.95) && player.y <= 0.05 && !player.flying) { player.swim = true; g2 = BAY.level + 0.02; }   // afloat, stretched out at the surface
       else g2 = Math.max(g2, BAY.level - 0.85);              // in the cove he wades, waist deep at most
     }
