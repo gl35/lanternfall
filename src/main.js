@@ -296,7 +296,8 @@ function dressKid(root) {
   for (let k = 0; k < n; k += 3) {
     const a = ix ? ix.getX(k) : k, b = ix ? ix.getX(k + 1) : k + 1, c = ix ? ix.getX(k + 2) : k + 2, h = (hgt[a] + hgt[b] + hgt[c]) / 3, o = (out[a] + out[b] + out[c]) / 3;
     const skirt = h > 0.25 && h < 0.66 && o < 0.26, bodice = h > 0.58 && h < 0.965 && o < 0.225; if (!skirt && !bodice) continue;
-    m.fillStyle = m.strokeStyle = skirt && bodice ? '#ff0' : skirt ? '#f00' : '#0f0';
+    const belt = !skirt && h < 0.76 && o < 0.2;                  // the band at her waist, just above where the skirt starts
+    m.fillStyle = m.strokeStyle = 'rgb(' + (skirt ? 255 : 0) + ',' + (bodice ? 255 : 0) + ',' + (belt ? 255 : 0) + ')';
     m.beginPath(); for (const q of [a, b, c]) { const x = uv.getX(q) * W, y = (map.flipY ? 1 - uv.getY(q) : uv.getY(q)) * H; q === a ? m.moveTo(x, y) : m.lineTo(x, y); } m.closePath(); m.fill(); m.stroke();
   }
   const px = g.getImageData(0, 0, W, H), mp = m.getImageData(0, 0, W, H).data, d = px.data;
@@ -304,14 +305,15 @@ function dressKid(root) {
     const skirt = mp[i] > 128, bodice = mp[i + 1] > 128; if (!skirt && !bodice) continue;
     const r = d[i], gg = d[i + 1], b = d[i + 2], mx = Math.max(r, gg, b), mn = Math.min(r, gg, b), L = (r + gg + b) / 765, cloth = mx < 62 || (mx - mn) / mx < 0.2;
     if (!cloth) continue;                                    // skin
+    if (mp[i + 2] > 128 && L < 0.3) { const t = Math.min(1, L * 3.3); d[i] = 44 + 50 * t; d[i + 1] = 14 + 26 * t; d[i + 2] = 104 + 70 * t; continue; }   // the belt: dark purple
     let done = true;
-    if (skirt && L < 0.5) { const t = Math.min(1, L * 2.4); d[i] = 178 + 22 * t; d[i + 1] = 120 + 18 * t; d[i + 2] = 188 + 20 * t; }          // the dark of the skirt: a soft violet, its folds kept
-    else if (skirt && !bodice) { d[i] = 205 + 30 * L; d[i + 1] = 160 + 40 * L; d[i + 2] = 215 + 25 * L; }                                          // its pale stripes: lilac
-    else if (bodice && L > 0.42) { const t = 0.6 + 0.4 * L; d[i] = 204 * t; d[i + 1] = 141 * t; d[i + 2] = 212 * t; }                    // the white blouse: a lighter purple
+    if (skirt && L < 0.5) { const t = Math.min(1, L * 2.4); d[i] = 132 + 40 * t; d[i + 1] = 78 + 34 * t; d[i + 2] = 224 + 24 * t; }          // the dark of the skirt: a soft violet, its folds kept
+    else if (skirt && !bodice) { d[i] = 150 + 70 * L; d[i + 1] = 110 + 80 * L; d[i + 2] = 255; }                                          // its pale stripes: lilac
+    else if (bodice && L > 0.42) { const t = 0.55 + 0.45 * L; d[i] = 156 * t; d[i + 1] = 100 * t; d[i + 2] = 246 * t; }                    // the white blouse: a lighter purple
     else done = false;
     if (done) {                                              // squiggles all over it, in a paler thread
       const x = ((i / 4) % W) / UPS, y = Math.floor(i / 4 / W) / UPS, wave = Math.sin((y + 6.5 * Math.sin(x * 0.12) + 2 * Math.sin(x * 0.29 + 1.3)) * 0.2);
-      const k = Math.min(1, Math.max(0, (wave - 0.86) / 0.08)); if (k > 0) { d[i] += (250 - d[i]) * k * 0.9; d[i + 1] += (232 - d[i + 1]) * k * 0.9; d[i + 2] += (252 - d[i + 2]) * k * 0.9; }
+      const k = Math.min(1, Math.max(0, (wave - 0.86) / 0.08)); if (k > 0) { d[i] += (240 - d[i]) * k * 0.9; d[i + 1] += (226 - d[i + 1]) * k * 0.9; d[i + 2] += (255 - d[i + 2]) * k * 0.9; }
     }
   }
   g.putImageData(px, 0, 0);
