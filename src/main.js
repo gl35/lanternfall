@@ -305,13 +305,13 @@ function dressKid(root) {
     const r = d[i], gg = d[i + 1], b = d[i + 2], mx = Math.max(r, gg, b), mn = Math.min(r, gg, b), L = (r + gg + b) / 765, cloth = mx < 62 || (mx - mn) / mx < 0.2;
     if (!cloth) continue;                                    // skin
     let done = true;
-    if (skirt && L < 0.5) { const t = Math.min(1, L * 2.4); d[i] = 132 + 40 * t; d[i + 1] = 78 + 34 * t; d[i + 2] = 224 + 24 * t; }          // the dark of the skirt: a soft violet, its folds kept
-    else if (skirt && !bodice) { d[i] = 150 + 70 * L; d[i + 1] = 110 + 80 * L; d[i + 2] = 255; }                                          // its pale stripes: lilac
-    else if (bodice && L > 0.42) { const t = 0.55 + 0.45 * L; d[i] = 156 * t; d[i + 1] = 100 * t; d[i + 2] = 246 * t; }                    // the white blouse: a lighter purple
+    if (skirt && L < 0.5) { const t = Math.min(1, L * 2.4); d[i] = 178 + 22 * t; d[i + 1] = 120 + 18 * t; d[i + 2] = 188 + 20 * t; }          // the dark of the skirt: a soft violet, its folds kept
+    else if (skirt && !bodice) { d[i] = 205 + 30 * L; d[i + 1] = 160 + 40 * L; d[i + 2] = 215 + 25 * L; }                                          // its pale stripes: lilac
+    else if (bodice && L > 0.42) { const t = 0.6 + 0.4 * L; d[i] = 204 * t; d[i + 1] = 141 * t; d[i + 2] = 212 * t; }                    // the white blouse: a lighter purple
     else done = false;
     if (done) {                                              // squiggles all over it, in a paler thread
       const x = ((i / 4) % W) / UPS, y = Math.floor(i / 4 / W) / UPS, wave = Math.sin((y + 6.5 * Math.sin(x * 0.12) + 2 * Math.sin(x * 0.29 + 1.3)) * 0.2);
-      const k = Math.min(1, Math.max(0, (wave - 0.86) / 0.08)); if (k > 0) { d[i] += (240 - d[i]) * k * 0.9; d[i + 1] += (226 - d[i + 1]) * k * 0.9; d[i + 2] += (255 - d[i + 2]) * k * 0.9; }
+      const k = Math.min(1, Math.max(0, (wave - 0.86) / 0.08)); if (k > 0) { d[i] += (250 - d[i]) * k * 0.9; d[i + 1] += (232 - d[i + 1]) * k * 0.9; d[i + 2] += (252 - d[i + 2]) * k * 0.9; }
     }
   }
   g.putImageData(px, 0, 0);
