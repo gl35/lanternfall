@@ -167,5 +167,5 @@ export function buildDragon(renderer) {
     model.rotation.set(THREE.MathUtils.clamp(-st.vy * 0.035, -0.32, 0.32) * a, 0, -st.turn * 0.42 * a);
   }
   update(0, { air: 0, speed: 0, vy: 0, turn: 0, ridden: false });
-  return { root, update, mouth, seat: { y: 1.9 * S, z: 0.5 * S } };
+  return { root, update, mouth, env, seat: { y: 1.9 * S, z: 0.5 * S } };
 }

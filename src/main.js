@@ -241,6 +241,41 @@ const WING = { scale: 1.15, root: 0.05 };                     // how big they ar
   }, undefined, e => console.error('wings model failed to load', e));
   wings.visible = false; heroTilt.add(wings);
 }
+// One for each copy of her (the one who wanders, and the one he steers). Built the first time her bones are there to measure her by.
+const cloakP = new THREE.Vector3(), CLOAK = { COLS: 13, ROWS: 14 };
+const kidCloak = { back: -1, mesh: null }, heroCloak = { back: 1, mesh: null };       // which way her back is, along z, in the group each hangs in
+function cloakUpdate(C, parent, bones, flow, T) {
+  const nb = bones.Neck || bones.Spine2; if (!nb) return;
+  parent.worldToLocal(nb.bone.getWorldPosition(cloakP));
+  if (!C.mesh) {
+    if (cloakP.y < 0.05) return;
+    const L = C.L = cloakP.y * 0.7, n = (CLOAK.COLS + 1) * (CLOAK.ROWS + 1), col = new Float32Array(n * 3), idx = [], deep = new THREE.Color(0x2c0c78), mid = new THREE.Color(0x5a1fd0), trim = new THREE.Color(0xa77cf2), c = new THREE.Color();
+    for (let r = 0; r <= CLOAK.ROWS; r++) for (let q = 0; q <= CLOAK.COLS; q++) {
+      const t = r / CLOAK.ROWS, edge = Math.abs(q / CLOAK.COLS * 2 - 1);
+      c.copy(mid).lerp(deep, t * 0.7); if (r === CLOAK.ROWS || edge > 0.93 || r === 0) c.copy(trim);                  // a pale border all round
+      c.toArray(col, (r * (CLOAK.COLS + 1) + q) * 3);
+      if (r < CLOAK.ROWS && q < CLOAK.COLS) { const a = r * (CLOAK.COLS + 1) + q, b = a + CLOAK.COLS + 1; idx.push(a, a + 1, b, a + 1, b + 1, b); }
+    }
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(n * 3), 3)); g.setAttribute('color', new THREE.BufferAttribute(col, 3)); g.setIndex(idx);
+    const env = dragon.env, cloth = new THREE.MeshPhysicalMaterial({ color: 0xffffff, vertexColors: true, metalness: 0.55, roughness: 0.38, envMap: env, envMapIntensity: 0.7, side: THREE.DoubleSide, clearcoat: 0.3, clearcoatRoughness: 0.3, iridescence: 0.3, iridescenceIOR: 1.6 });
+    C.mesh = new THREE.Group(); C.sheet = new THREE.Mesh(g, cloth); C.sheet.castShadow = true; C.sheet.frustumCulled = false; C.mesh.add(C.sheet);
+    const metal = new THREE.MeshStandardMaterial({ color: 0xc9a6ff, metalness: 0.9, roughness: 0.22, envMap: env, envMapIntensity: 1.4 });
+    const collar = new THREE.Mesh(new THREE.TorusGeometry(L * 0.1, L * 0.03, 8, 20), cloth); collar.rotation.x = Math.PI / 2; collar.position.set(0, -L * 0.035, C.back * L * 0.02); collar.scale.set(1.25, 1, 1); C.mesh.add(collar);
+    const clasp = new THREE.Mesh(new THREE.SphereGeometry(L * 0.035, 12, 8), metal); clasp.position.set(0, -L * 0.05, -C.back * L * 0.085); C.mesh.add(clasp);
+    parent.add(C.mesh);
+  }
+  C.mesh.position.copy(cloakP);
+  const L = C.L, rs = L * 0.175, p = C.sheet.geometry.attributes.position, bk = C.back;
+  for (let r = 0; r <= CLOAK.ROWS; r++) for (let q = 0; q <= CLOAK.COLS; q++) {
+    const t = r / CLOAK.ROWS, cc = q / CLOAK.COLS * 2 - 1, ang = cc * (2.0 - 1.05 * t), rad = rs * (1 + 1.25 * t), k = t * L;
+    const wave = Math.sin(T * 3.1 + t * 4.2 + cc * 1.7) * 0.022 + Math.sin(T * 1.7 + cc * 2.6) * 0.012;
+    p.setXYZ(r * (CLOAK.COLS + 1) + q,
+      Math.sin(ang) * rad + Math.sin(T * 2.2 + t * 3.3) * 0.02 * k * (1 + flow),
+      L * 0.035 - k - (1 - t) * Math.abs(cc) * rs * 0.42 + flow * 0.16 * t * k,
+      bk * (Math.cos(ang) * rad * 0.8 + k * 0.05 + (wave + flow * 0.42 * t) * k));
+  }
+  p.needsUpdate = true; C.sheet.geometry.computeVertexNormals();
+}
 const kidE = new THREE.Euler(), kidQ = new THREE.Quaternion(), kidQ2 = new THREE.Quaternion(), D2R = Math.PI / 180;
 function kidPose() {
   for (const n in kid.pose) { const b = kid.bones[n]; if (!b) continue; const [x, y, z] = kid.pose[n]; b.bone.quaternion.copy(b.bind).multiply(kidQ.setFromEuler(kidE.set(x * D2R, y * D2R, z * D2R))); }
@@ -324,6 +359,7 @@ function kidGo(x, z, run) {
 function updateKid(dt, dtReal) {
   if (!kid.mixer || (kid.away && !player.ride)) return;
   kid.mixer.update(dtReal);
+  cloakUpdate(kidCloak, kid.group, kid.bones, kid.ride === 'dragon' ? Math.min(1, Math.hypot(play.dragon.vx, play.dragon.vz) / 9) : kid.ride === 'boat' ? Math.min(1, Math.abs(play.boat.v) / 5) : kid.mode === 'go' ? Math.min(1, kid.speed / 6) : 0, time);
   if (kid.mode === 'ride') {
     kid.t -= dt; kidPose();
     rideLimbs();
@@ -1669,6 +1705,8 @@ function step(dtReal) {
     flyW += ((heroMode === 'fly' || player.perch || player.swim ? 1 : 0) - flyW) * Math.min(1, dtReal * 8);
     swimT += dtReal * (1.3 + 3.4 * player.moving); const stroke = swimT;
     const POSE = player.perch ? SIT_POSE : FLY_POSE;
+    if (heroIx === KID && flyBones.Spine2) cloakUpdate(heroCloak, heroTilt, flyBones, player.flying && player.y > 0 ? 1 : player.swim ? 0.2 : player.moving * 0.55, time);
+    if (heroCloak.mesh) heroCloak.mesh.visible = heroIx === KID;
     wings.visible = heroIx === KID && player.flying && player.y > 0 && !!flyBones.Spine2 && !!wings.userData.ready;   // hers alone, and only in the air
     if (wings.visible) {                                           // they sit between her shoulder blades and beat
       wingW += (1 - wingW) * Math.min(1, dtReal * 7);
