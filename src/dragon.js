@@ -37,8 +37,9 @@ export function buildDragon(renderer) {
     const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
   })();
   const skin = new THREE.MeshPhysicalMaterial({ color: 0xffffff, map: veins, emissive: 0xffffff, emissiveMap: veins, emissiveIntensity: 0.3, metalness: 0.45, roughness: 0.32, envMap: env, envMapIntensity: 1.0, side: THREE.DoubleSide, vertexColors: true, iridescence: 0.6, iridescenceIOR: 1.5 });
-  const eyeMat = new THREE.MeshStandardMaterial({ color: 0xff9cf0, emissive: 0xe04cff, emissiveIntensity: 1.5, roughness: 0.15 });
-  const dark = new THREE.MeshStandardMaterial({ color: 0x1c0a3a, roughness: 0.6 });
+  const eyeMat = new THREE.MeshStandardMaterial({ color: 0xf6dcff, emissive: 0xd070ff, emissiveIntensity: 0.9, roughness: 0.15 });
+  const glint = new THREE.MeshBasicMaterial({ color: 0xffffff });
+  const dark = new THREE.MeshStandardMaterial({ color: 0x0c0418, roughness: 0.35 });
 
   const S = 0.85, root = new THREE.Group(), model = new THREE.Group(); model.scale.setScalar(S); root.add(model);
   const sphere = new THREE.SphereGeometry(1, 28, 18), coneG = new THREE.ConeGeometry(1, 1, 12);
@@ -73,9 +74,12 @@ export function buildDragon(renderer) {
   }
   const head = new THREE.Group(); head.position.z = 0.3; head.rotation.x = 0.4; at.add(head);
   ball(head, hide, 0.2, 0.18, 0.3, 0, 0.02, 0.14); ball(head, hide, 0.125, 0.095, 0.36, 0, -0.01, 0.52); ball(head, hide, 0.085, 0.05, 0.1, 0, 0.055, 0.8);
+  const mouth = new THREE.Object3D(); mouth.position.set(0, -0.05, 0.9); head.add(mouth);
   const jaw = new THREE.Group(); jaw.position.set(0, -0.08, 0.16); head.add(jaw); ball(jaw, belly, 0.105, 0.04, 0.34, 0, -0.02, 0.3);
   for (const sx of [-1, 1]) {
-    const eye = ball(head, eyeMat, 0.05, 0.068, 0.09, sx * 0.145, 0.075, 0.3); eye.rotation.y = sx * 0.5; ball(head, dark, 0.016, 0.05, 0.034, sx * 0.185, 0.075, 0.33); ball(head, belly, 0.012, 0.014, 0.012, sx * 0.19, 0.105, 0.35);
+    const eye = new THREE.Group(); eye.position.set(sx * 0.145, 0.075, 0.3); eye.rotation.y = -sx * 0.4; head.add(eye);       // turned a little to look ahead
+    ball(eye, eyeMat, 0.052, 0.07, 0.092, 0, 0, 0); ball(eye, dark, 0.012, 0.052, 0.024, sx * 0.046, 0, 0.004);                 // a tall dark slit of a pupil on the pale iris
+    ball(eye, glint, 0.008, 0.012, 0.012, sx * 0.047, 0.03, 0.026);
     ball(head, hide, 0.055, 0.03, 0.14, sx * 0.13, 0.135, 0.27).rotation.z = -sx * 0.3;           // brow
     ball(head, dark, 0.016, 0.012, 0.026, sx * 0.045, 0.06, 0.87);                                // nostril
     curl(head, hornMat, [V(sx * 0.09, 0.12, 0.0), V(sx * 0.15, 0.36, -0.2), V(sx * 0.2, 0.6, -0.28), V(sx * 0.2, 0.8, -0.18), V(sx * 0.15, 0.9, 0.0), V(sx * 0.11, 0.84, 0.12)], 0.075, 0.01);   // tall horns that rise, sweep back and curl forward at the tip
@@ -134,7 +138,7 @@ export function buildDragon(renderer) {
     wings.push({ inner, outer });
   }
 
-  let ph = 0, walk = 0, t = 0, airS = 0;
+  let ph = 0, walk = 0, t = 0, airS = 0, fireS = 0;
   const lerp = (a, b, k) => a + (b - a) * k;
   // st: { air: on the ground or flying, speed, vy, turn (-1..1), ridden }
   function update(dt, st) {
@@ -151,7 +155,8 @@ export function buildDragon(renderer) {
     neck.forEach((s, i) => { if (i) { s.rotation.y = Math.sin(t * 0.6 + i * 0.25) * 0.035 * look * (1 - a) + st.turn * 0.05; s.rotation.x = lerp(s.userData.rx, 0.06, a) + Math.sin(t * 1.2 + i * 0.35) * 0.008; } });
     neckBase.rotation.x = lerp(-1.2, -0.52, a);               // stretched out ahead in flight
     head.rotation.set(lerp(0.4, 0.02, a) + Math.sin(t * 0.9) * 0.03, Math.sin(t * 0.45) * 0.3 * look * (1 - a), 0);
-    jaw.rotation.x = 0.05 + Math.max(0, Math.sin(t * 0.8)) * 0.07;
+    fireS += ((st.fire ? 1 : 0) - fireS) * Math.min(1, dt * 12);
+    jaw.rotation.x = 0.05 + Math.max(0, Math.sin(t * 0.8)) * 0.07 + 0.5 * fireS; head.rotation.x -= 0.12 * fireS;
     const stride = Math.min(1, st.speed / 2.2);
     for (const l of legs) {
       const s = Math.sin(walk + l.ph);
@@ -162,5 +167,5 @@ export function buildDragon(renderer) {
     model.rotation.set(THREE.MathUtils.clamp(-st.vy * 0.035, -0.32, 0.32) * a, 0, -st.turn * 0.42 * a);
   }
   update(0, { air: 0, speed: 0, vy: 0, turn: 0, ridden: false });
-  return { root, update, seat: { y: 1.9 * S, z: 0.5 * S } };
+  return { root, update, mouth, seat: { y: 1.9 * S, z: 0.5 * S } };
 }
