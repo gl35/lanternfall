@@ -356,6 +356,7 @@ function shoeBows(root) {
   }
 }
 const BOW = { up: 0.052, fwd: -0.012 };                        // where the bow sits from the joint of her toes, in metres at her own size
+const SHOE = { side: 0.33, vamp: 0.58, rise: 0.85, heel: 0.4, strap: 0.37, strapW: 0.04 };   // the cut of the shoe: side height, where the toe cover starts and how far it rises, heel height, the strap
 const SHOE_TOP = 0.03;                                       // how far above her ankles her shoes come, as a part of her height
 function dressKid(root) {
   let mesh = null; root.traverse(o => { if (o.isSkinnedMesh && !mesh) mesh = o; });
@@ -370,18 +371,39 @@ function dressKid(root) {
   const hc = document.createElement('canvas'); hc.width = W; hc.height = H; const hm = hc.getContext('2d', { willReadFrequently: true });   // how far down her hair each bit of the picture is
   hm.fillStyle = '#000'; hm.fillRect(0, 0, W, H); hm.globalCompositeOperation = 'lighten'; hm.lineWidth = 2 * UPS; hm.lineJoin = 'round';
   const toe = at('LeftToeBase'), fwd = new THREE.Vector3().crossVectors(side, up).normalize(); if (toe && toe.clone().sub(lf).dot(fwd) < 0) fwd.negate();
+  const shoeTris = [], along = [];
   const v = new THREE.Vector3(), hgt = [], out = [], dep = [], n = ix ? ix.count : pos.count;
-  for (let i = 0; i < pos.count; i++) { v.fromBufferAttribute(pos, i); hgt.push(v.clone().sub(foot).dot(up) / span); dep.push(v.clone().sub(head).dot(fwd) / span); out.push(Math.abs(v.sub(hips).dot(side)) / span); }
+  for (let i = 0; i < pos.count; i++) { v.fromBufferAttribute(pos, i); hgt.push(v.clone().sub(foot).dot(up) / span); along.push(v.clone().sub(v.clone().sub(hips).dot(side) > 0 ? lf : rf).dot(fwd) / span); dep.push(v.clone().sub(head).dot(fwd) / span); out.push(Math.abs(v.sub(hips).dot(side)) / span); }
   for (let k = 0; k < n; k += 3) {
     const a = ix ? ix.getX(k) : k, b = ix ? ix.getX(k + 1) : k + 1, c = ix ? ix.getX(k + 2) : k + 2, h = (hgt[a] + hgt[b] + hgt[c]) / 3, o = (out[a] + out[b] + out[c]) / 3;
     const face = h > 0.93 && o < 0.055 && (dep[a] + dep[b] + dep[c]) / 3 > 0;                               // eyes, brows and mouth are dark too, and stay as they are
     const tips = h > 0.76 && o < 0.3 && !face ? Math.pow(Math.min(1, Math.max(0, (1.075 - h) / 0.2)), 1.3) : 0;   // black at the roots, fading to purple down the length                     // the lower lengths of her hair
     if (tips > 0) { const q8 = Math.round(tips * 255); hm.fillStyle = hm.strokeStyle = 'rgb(' + q8 + ',' + q8 + ',' + q8 + ')'; hm.beginPath(); for (const q of [a, b, c]) { const x = uv.getX(q) * W, y = (map.flipY ? 1 - uv.getY(q) : uv.getY(q)) * H; q === a ? hm.moveTo(x, y) : hm.lineTo(x, y); } hm.closePath(); hm.fill(); hm.stroke(); }
-    if (h < SHOE_TOP) { m.fillStyle = m.strokeStyle = h < -0.052 ? 'rgb(0,0,110)' : 'rgb(0,0,255)'; m.beginPath(); for (const q of [a, b, c]) { const x = uv.getX(q) * W, y = (map.flipY ? 1 - uv.getY(q) : uv.getY(q)) * H; q === a ? m.moveTo(x, y) : m.lineTo(x, y); } m.closePath(); m.fill(); m.stroke(); continue; }   // her shoes
+    if (h < SHOE_TOP) { shoeTris.push(a, b, c); m.fillStyle = m.strokeStyle = 'rgb(0,0,255)'; m.beginPath(); for (const q of [a, b, c]) { const x = uv.getX(q) * W, y = (map.flipY ? 1 - uv.getY(q) : uv.getY(q)) * H; q === a ? m.moveTo(x, y) : m.lineTo(x, y); } m.closePath(); m.fill(); m.stroke(); continue; }   // her shoes
     const skirt = h > 0.25 && h < 0.66 && o < 0.26, bodice = h > 0.58 && h < 0.965 && o < 0.225; if (!skirt && !bodice) continue;
     const belt = !skirt && h < 0.76 && o < 0.2;                  // the band at her waist, just above where the skirt starts
     m.fillStyle = m.strokeStyle = 'rgb(' + (skirt ? 255 : 0) + ',' + (bodice ? 255 : 0) + ',' + (belt ? 255 : 0) + ')';
     m.beginPath(); for (const q of [a, b, c]) { const x = uv.getX(q) * W, y = (map.flipY ? 1 - uv.getY(q) : uv.getY(q)) * H; q === a ? m.moveTo(x, y) : m.lineTo(x, y); } m.closePath(); m.fill(); m.stroke();
+  }
+  // Where on the shoe each bit of the picture is: how far from heel (0) to toe (1), and how far up from the sole (0) to its top (1).
+  const sF = new Float32Array(W * H).fill(-1), sH = new Float32Array(W * H);
+  {
+    let f0 = 1e9, f1 = -1e9, h0 = 1e9; for (const q of shoeTris) { f0 = Math.min(f0, along[q]); f1 = Math.max(f1, along[q]); h0 = Math.min(h0, hgt[q]); }
+    const U = q => uv.getX(q) * W, Vv = q => (map.flipY ? 1 - uv.getY(q) : uv.getY(q)) * H;
+    for (let k = 0; k < shoeTris.length; k += 3) {
+      const a = shoeTris[k], b = shoeTris[k + 1], c = shoeTris[k + 2], x0 = U(a), y0 = Vv(a), x1 = U(b), y1 = Vv(b), x2 = U(c), y2 = Vv(c), den = (y1 - y2) * (x0 - x2) + (x2 - x1) * (y0 - y2); if (Math.abs(den) < 1e-6) continue;
+      for (let y = Math.max(0, Math.floor(Math.min(y0, y1, y2)) - 1); y <= Math.min(H - 1, Math.ceil(Math.max(y0, y1, y2)) + 1); y++) for (let x = Math.max(0, Math.floor(Math.min(x0, x1, x2)) - 1); x <= Math.min(W - 1, Math.ceil(Math.max(x0, x1, x2)) + 1); x++) {
+        const w0 = ((y1 - y2) * (x + 0.5 - x2) + (x2 - x1) * (y + 0.5 - y2)) / den, w1 = ((y2 - y0) * (x + 0.5 - x2) + (x0 - x2) * (y + 0.5 - y2)) / den, w2 = 1 - w0 - w1;
+        if (w0 < -0.25 || w1 < -0.25 || w2 < -0.25) continue;                       // a little over the edge, so seams are covered
+        const inside = w0 >= 0 && w1 >= 0 && w2 >= 0, at = y * W + x; if (!inside && sF[at] >= 0) continue;
+        sF[at] = Math.min(1, Math.max(0, (w0 * along[a] + w1 * along[b] + w2 * along[c] - f0) / (f1 - f0)));
+        sH[at] = Math.min(1, Math.max(0, (w0 * hgt[a] + w1 * hgt[b] + w2 * hgt[c] - h0) / (SHOE_TOP - h0)));
+      }
+    }
+  }
+  for (let pass = 0; pass < 4; pass++) {                      // spread what is known a few points outward, over the seams
+    const src = sF.slice();
+    for (let y = 1; y < H - 1; y++) for (let x = 1; x < W - 1; x++) { const at = y * W + x; if (src[at] >= 0) continue; for (const o of [-1, 1, -W, W]) if (src[at + o] >= 0) { sF[at] = src[at + o]; sH[at] = sH[at + o]; break; } }
   }
   const px = g.getImageData(0, 0, W, H), mp = m.getImageData(0, 0, W, H).data, hp = hm.getImageData(0, 0, W, H).data, d = px.data;
   for (let i = 0; i < d.length; i += 4) {
@@ -389,12 +411,13 @@ function dressKid(root) {
       const mx0 = Math.max(d[i], d[i + 1], d[i + 2]), mn0 = Math.min(d[i], d[i + 1], d[i + 2]);
       if (mx0 < 84 && mx0 - mn0 < 30) { const k = hp[i] / 255, L0 = (d[i] + d[i + 1] + d[i + 2]) / 765; d[i] += (Math.min(255, 128 + 560 * L0) - d[i]) * k; d[i + 1] += (Math.min(255, 52 + 340 * L0) - d[i + 1]) * k; d[i + 2] += (Math.min(255, 226 + 200 * L0) - d[i + 2]) * k; if (k > 0.97) { HAIR_DYE[0] += d[i]; HAIR_DYE[1] += d[i + 1]; HAIR_DYE[2] += d[i + 2]; HAIR_DYE[3]++; } continue; }
     }
-    if (mp[i + 2] > 70 && mp[i] < 128 && mp[i + 1] < 128) {      // shoes: the dress's purple, their shading kept
-      const mx1 = Math.max(d[i], d[i + 1], d[i + 2]), mn1 = Math.min(d[i], d[i + 1], d[i + 2]);
-      if (mx1 < 62 || (mx1 - mn1) / mx1 < 0.25) { const t = Math.min(1, (d[i] + d[i + 1] + d[i + 2]) / 765 * 1.6), part = mp[i + 2];
-        if (part < 145) { d[i] = 52 + 30 * t; d[i + 1] = 22 + 20 * t; d[i + 2] = 108 + 40 * t; }                 // sole
-        else if (part < 218) { d[i] = 226 + 20 * t; d[i + 1] = 206 + 30 * t; d[i + 2] = 255; }                    // piping
-        else { d[i] = 112 + 60 * t; d[i + 1] = 56 + 60 * t; d[i + 2] = 212 + 38 * t; } }
+    if (mp[i + 2] > 70 && mp[i] < 128 && mp[i + 1] < 128) {
+      const at = i / 4, f = sF[at] < 0 ? 0.3 : sF[at], hh = sF[at] < 0 ? 0.95 : sH[at], sh = 0.86 + 0.28 * Math.min(1, (d[i] + d[i + 1] + d[i + 2]) / 300), weave = ((at % W) + Math.floor(at / W)) % 2 ? 1.03 : 0.97;
+      const edge = SHOE.side + SHOE.rise * Math.pow(Math.max(0, (f - SHOE.vamp) / (1 - SHOE.vamp)), 0.7) + SHOE.heel * Math.pow(Math.max(0, 1 - f / 0.22), 1.5);   // how high the upper comes at this point along the foot
+      const strap = Math.abs(f - SHOE.strap) < SHOE.strapW && hh < 0.82, upper = hh < edge || strap || f > 0.86;
+      if (hh < 0.13) { d[i] = 198 * sh; d[i + 1] = 166 * sh; d[i + 2] = 122 * sh; }                                 // the sole
+      else if (upper) { const trim = !strap && f <= 0.86 && hh > edge - 0.05 ? 1.1 : 1; d[i] = Math.min(255, 182 * sh * weave * trim); d[i + 1] = Math.min(255, 164 * sh * weave * trim); d[i + 2] = Math.min(255, 214 * sh * weave * trim); }
+      else { d[i] = 17; d[i + 1] = 17; d[i + 2] = 21; }                                                               // cut away: her sock
       continue;
     }
     const skirt = mp[i] > 128, bodice = mp[i + 1] > 128; if (!skirt && !bodice) continue;
