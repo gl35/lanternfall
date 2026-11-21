@@ -585,8 +585,8 @@ function grassField(r, U, o) {
   const mat = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
   mat.customProgramCacheKey = () => 'grass' + o.tile;     // the two layers compile different shaders
   mat.onBeforeCompile = s => {
-    s.uniforms.uTime = U.time; s.uniforms.uWind = U.wind; s.uniforms.uCenter = U.center; s.uniforms.uSnow = U.snow;
-    s.vertexShader = `uniform float uTime, uSnow, uWind; uniform vec2 uCenter; vec2 wrapOff; float bend, ground;\n` + HILL_GLSL + '\n' + s.vertexShader
+    s.uniforms.uTime = U.time; s.uniforms.uWind = U.wind; s.uniforms.uCenter = U.center; s.uniforms.uSnow = U.snow; s.uniforms.uBurn = U.burn;
+    s.vertexShader = `uniform float uTime, uSnow, uWind; uniform vec2 uCenter; uniform vec4 uBurn[8]; vec2 wrapOff; float bend, ground;\n` + HILL_GLSL + '\n' + s.vertexShader
       .replace('#include <begin_vertex>', `#include <begin_vertex>
         vec3 ip = instanceMatrix[3].xyz;
         vec2 wp = mod(ip.xz - uCenter + ${H}, ${T}) - ${H} + uCenter;
@@ -610,6 +610,8 @@ function grassField(r, U, o) {
         float patchTone = sin(wp.x * 0.31 + sin(wp.y * 0.23) * 1.7) * sin(wp.y * 0.27 - wp.x * 0.11);
         vColor.rgb *= vec3(1.0 + patchTone * 0.10, 1.0 + patchTone * 0.04, 1.0 - patchTone * 0.12);   // drifts of yellower and bluer green
         vColor.rgb *= 0.84 + gust * 0.55 * position.y;                  // the sheen that travels with each gust
+        float burnt = 0.0; for (int bi = 0; bi < 8; bi++) burnt = max(burnt, uBurn[bi].w * (1.0 - smoothstep(uBurn[bi].z * 0.5, uBurn[bi].z, distance(wp, uBurn[bi].xy) + (hsh - 0.5) * 0.7)));
+        transformed.y *= 1.0 - 0.74 * burnt; vColor.rgb = mix(vColor.rgb, vec3(0.045, 0.035, 0.04), burnt * 0.94);   // scorched short and black where fire has been
         vColor.rgb = mix(vColor.rgb, vec3(0.86, 0.80, 0.62), uSnow);`)
       .replace('#include <project_vertex>', `vec4 mvPosition = instanceMatrix * vec4(transformed, 1.0);
         float lean = bend * mvPosition.y * mvPosition.y;
@@ -945,7 +947,8 @@ export function buildScenery(scene) {
   const r = rng(20261117);
   const bark = barkTexture(rng(5)); bark.repeat.set(3, 1);
   trunkMat.map = bark; trunkMat.bumpMap = bark; trunkMat.bumpScale = 2.5; trunkMat.needsUpdate = true;
-  const U = { time: { value: 0 }, wind: { value: 1 }, center: { value: new THREE.Vector2(START.x, START.z) }, snow: { value: 0 } };
+  const U = { time: { value: 0 }, wind: { value: 1 }, center: { value: new THREE.Vector2(START.x, START.z) }, snow: { value: 0 },
+    burn: { value: Array.from({ length: 8 }, () => new THREE.Vector4(0, 0, 1, 0)) }, spots: Array.from({ length: 8 }, () => ({ x: 0, z: 0, w: 0, age: 0, mesh: null })), charred: new Map() };   // burnt rounds of grass (x, z, radius, how burnt), and trees stripped by fire
   let lastT = 0;
   const skyMesh = sky(); scene.add(skyMesh);
   const sea = cloudSea(r); scene.add(sea.group);
@@ -1032,8 +1035,24 @@ export function buildScenery(scene) {
       m.frustumCulled = false; scene.add(m); return m;
     },
     get wind() { return U.wind.value; }, get windTime() { return U.time.value; },
+    // fire on the ground: the grass in that round is scorched and the earth under it blackened; it grows back after a while
+    burn(x, z, rad = 2.6) {
+      let k = U.spots.findIndex(q => q.w > 0 && Math.hypot(q.x - x, q.z - z) < rad * 0.6);
+      if (k < 0) k = U.spots.findIndex(q => q.w <= 0);
+      if (k < 0) { k = 0; U.spots.forEach((q, i) => { if (q.age > U.spots[k].age) k = i; }); }
+      const q = U.spots[k]; if (!(q.w > 0 && Math.hypot(q.x - x, q.z - z) < rad * 0.6)) { q.x = x; q.z = z; }
+      q.w = 1; q.age = 0; U.burn.value[k].set(q.x, q.z, rad, 1);
+      if (!q.mesh) { q.mesh = new THREE.Mesh(new THREE.CircleGeometry(1, 28), new THREE.MeshBasicMaterial({ map: softTexture('rgba(255,255,255,1)', 'rgba(255,255,255,0)'), color: 0x120c10, transparent: true, depthWrite: false })); q.mesh.rotation.x = -Math.PI / 2; q.mesh.renderOrder = 1; scene.add(q.mesh); }
+      q.mesh.position.set(q.x, hillHeight(q.x, q.z) + 0.06, q.z); q.mesh.scale.setScalar(rad * 1.2);
+    },
+    // fire in a tree: its leaves are gone until they grow back. False if it has none to lose.
+    burnTree(i) {
+      if (U.charred.has(i) || i >= trees.length - 4 || season !== 'summer') return false;
+      const a = Math.round(i * LEAVES_PER), b = Math.round((i + 1) * LEAVES_PER), im = foliage.instanceMatrix, saved = im.array.slice(a * 16, b * 16);
+      im.array.fill(0, a * 16, b * 16); im.needsUpdate = true; U.charred.set(i, { t: 50, a, saved }); return true;
+    },
     // a tree is bare when (nearly) none of its leaves are being drawn
-    isBare(i) { return season !== 'summer' || (foliage.count - i * LEAVES_PER) / LEAVES_PER < 0.35; },
+    isBare(i) { return U.charred.has(i) || season !== 'summer' || (foliage.count - i * LEAVES_PER) / LEAVES_PER < 0.35; },
     // the limbs of tree i as world-space segments, each with the radius of the limb along it
     limbs(i) {
       const t = trees[i]; t.updateMatrixWorld(true);
@@ -1043,7 +1062,10 @@ export function buildScenery(scene) {
       // the wind: a slow swell between near calm and a stiff breeze, with shorter gusts riding on it
       const swell = 0.5 + 0.5 * Math.sin(t * 0.085 + 1.4 * Math.sin(t * 0.027)), puff = Math.max(0, Math.sin(t * 0.37 + 2.0 * Math.sin(t * 0.11))) ** 3;
       U.wind.value = Math.min(1.9, 0.12 + 1.15 * swell * swell + 0.65 * puff * (0.3 + swell));
-      U.time.value += Math.min(0.1, Math.max(0, t - lastT)) * (0.3 + 0.75 * U.wind.value); lastT = t;
+      const dtB = Math.min(0.1, Math.max(0, t - lastT));
+      U.spots.forEach((q, k) => { if (q.w > 0) { q.age += dtB; if (q.age > 32) q.w = Math.max(0, q.w - dtB / 14); U.burn.value[k].w = q.w; q.mesh.material.opacity = 0.85 * q.w; q.mesh.visible = q.w > 0; } });
+      for (const [i, c] of U.charred) { c.t -= dtB; if (c.t <= 0) { foliage.instanceMatrix.array.set(c.saved, c.a * 16); foliage.instanceMatrix.needsUpdate = true; U.charred.delete(i); } }
+      U.time.value += dtB * (0.3 + 0.75 * U.wind.value); lastT = t;
       skyMesh.material.uniforms.uT.value = U.time.value;
       U.center.value.set(px, pz);
       if (woods.visible && Math.abs(t - lodT) > 0.2) { lodT = t; woods.userData.lod(px, pz, detailQ); } sea.group.rotation.y = t * 0.003; heaps.rotation.y = t * 0.0016;

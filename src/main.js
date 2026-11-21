@@ -1074,6 +1074,25 @@ const dragon = buildDragon(renderer); scene.add(dragon.root);
     put(k) { k.position.set(0, dragon.seat.y - 0.93, dragon.seat.z); k.rotation.set(0, 0, 0); this.still = 0; this.flew = false; this.vx = this.vz = this.vy = 0; camYaw = Math.PI - dragon.root.rotation.y; },
     get exit() { const h = dragon.root.rotation.y; return { x: this.x + Math.cos(h) * 2.7, z: this.z - Math.sin(h) * 2.7 }; } };
 }
+// Things alight: each burns with purple flame and a little smoke for a few seconds.
+const fires = [];
+function ignite(x, y, z, r, h, t) {
+  let f = fires.find(q => q.t > 0 && Math.hypot(q.x - x, q.z - z) < 1.5 && Math.abs(q.y - y) < 2) || fires.find(q => q.t <= 0);
+  if (!f) { if (fires.length > 14) return; fires.push(f = {}); }
+  Object.assign(f, { x, y, z, r, h, t });
+}
+// Follow the jet out from the mouth: trees it passes through catch and lose their leaves, anyone in it jumps, and where it meets the ground the grass is scorched.
+function dragonBurn(P, D, reach) {
+  for (let d = 1.5; d <= reach; d += 1.5) {
+    const x = P.x + D.x * d, y = P.y + D.y * d - 0.02 * d * d, z = P.z + D.z * d, g = hillHeight(x, z);
+    TREES.forEach((t, i) => { if (Math.hypot(t.x - x, t.z - z) < 0.7 * t.s + 1.5 && y < g + 8 * t.s) { if (scenery.burnTree(i)) sfx.thump(0.2); ignite(t.x, g + 1.5 * t.s, t.z, 1.7 * t.s, 4.5 * t.s, 3.5); } });
+    if (y < g + 3) {
+      if (!kid.away && !kid.ride && Math.hypot(kid.x - x, kid.z - z) < 1.7 && (kid.singed || 0) < time) { kid.singed = time + 3; kidStruck(-D.x, -D.z); }
+      if (!npc.away && Math.hypot(npc.x - x, npc.z - z) < npc.r + 0.8 && (npc.singed || 0) < time) { npc.singed = time + 3; npcStruck(); }
+    }
+    if (y <= g + 0.35) { scenery.burn(x, z, 2.7); ignite(x, g + 0.1, z, 1.7, 0.5, 2.4); return; }
+  }
+}
 function flyDragon(dt, jx, jy, l) {
   const e = play.dragon, b = e.g, air = e.alt > 0.05;
   let turn = 0;
@@ -1133,12 +1152,19 @@ function updatePlay(dt) {
       dragon.update(dt, { air: e.alt > 0.05, speed: Math.hypot(e.vx, e.vz), vy: e.vy, turn: e.turn, ridden: e.rider, fire: e.fire > 0 });
       if (e.fire > 0) {                                      // purple fire: a hot pale core widening into violet
         e.fire -= dt; dragon.mouth.getWorldPosition(fireP); dragon.mouth.getWorldDirection(fireD);
+        if (e.alt > 1) { fireD.y -= 0.35; fireD.normalize(); }       // from the air it breathes down at the ground
+        e.burnT = (e.burnT || 0) - dt; if (e.burnT <= 0) { e.burnT = 0.12; dragonBurn(fireP, fireD, e.alt > 1 ? 20 : 12); }
         for (let k = Math.ceil(dt * 110); k > 0; k--) {
           const sp = 8 + Math.random() * 7, c = Math.random();
           spawn(fireP.x + fireD.x * 0.15, fireP.y + fireD.y * 0.15, fireP.z + fireD.z * 0.15, fireD.x * sp + e.vx + rnd(1.2), fireD.y * sp + 0.5 + rnd(1.2), fireD.z * sp + e.vz + rnd(1.2), 0.3 + Math.random() * 0.4, 0.14 + Math.random() * 0.14,
             { color: c < 0.12 ? 0xe9a8ff : c < 0.5 ? 0xa02cf0 : c < 0.85 ? 0x7018d8 : 0x4a0cb0, grow: 1.5, alpha: 0.42 });
         }
       }
+    }
+    for (const f of fires) if (f.t > 0) {
+      f.t -= dt;
+      for (let k = Math.ceil(dt * 45); k > 0; k--) spawn(f.x + rnd(f.r), f.y + Math.random() * f.h, f.z + rnd(f.r), rnd(0.4), 1.2 + Math.random() * 1.8, rnd(0.4), 0.4 + Math.random() * 0.4, 0.16 + Math.random() * 0.14, { color: Math.random() < 0.5 ? 0xa02cf0 : 0x7018d8, grow: 0.8, alpha: 0.5 });
+      if (Math.random() < dt * 6) spawn(f.x + rnd(f.r), f.y + f.h, f.z + rnd(f.r), rnd(0.3), 1.4 + Math.random(), rnd(0.3), 1.8, 0.5, { puff: true, color: 0x3a3340, grow: 0.9, alpha: 0.45 });
     }
     const mb = play.bars, sd = play.sand;
     if (mb.rider) {                                          // along the rungs and back to the middle of the far end, body swinging under her hands
