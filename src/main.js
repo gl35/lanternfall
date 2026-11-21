@@ -152,9 +152,10 @@ const kid = { x: START.x + 7, z: START.z - 4, face: 0, group: new THREE.Group(),
     m.traverse(o => { if (o.isBone) kid.bones[o.name.replace(/^mixamorig:?/, '')] = { bone: o, bind: o.quaternion.clone() }; });
     kid.model = m;
     try { dressKid(m); } catch (err) { console.warn('dress not made', err); }
+    try { shoeBows(m); } catch (err) { console.warn('bows not made', err); }
     kid.mixer = new THREE.AnimationMixer(m);
     for (const c of g.animations) kid.acts[c.name] = kid.mixer.clipAction(c);
-    const twin = cloneSkinned(m); twin.rotation.y = Math.PI;
+    const twin = cloneSkinned(m); twin.rotation.y = Math.PI;                                         // the bows on her shoes are copied along with her
     twin.traverse(o => { if (o.isBone) flyBones[o.name.replace(/^mixamorig:?/, '')] = { bone: o, bind: o.quaternion.clone() }; }); heroCache['kid.glb'] = { scene: twin, animations: g.animations };   // the one he can steer
     kid.group.add(m); kidPlay('idle');
   }, undefined, e => console.error('kid model failed to load', e));
@@ -331,6 +332,23 @@ function cloakUpdate(C, parent, bones, flow, T) {
 // Her clothes are part of her one skin and one picture, so the dress is painted into that picture: every cloth-coloured
 // (white, grey or black) bit of it that lies on her body between her shoulders and the hem of her skirt. Skin and hair are left alone.
 const HAIR_DYE = [0, 0, 0, 0];                                // the sum of every fully dyed bit of her hair, and how many
+function shoeBows(root) {
+  root.updateMatrixWorld(true);
+  const find = n => { let b = null; root.traverse(o => { if (o.isBone && o.name.replace(/^mixamorig:?/, '') === n) b = o; }); return b; };
+  const silk = new THREE.MeshStandardMaterial({ color: 0xd9c2ff, roughness: 0.3, metalness: 0.25 }), pearl = new THREE.MeshStandardMaterial({ color: 0xfff6ff, roughness: 0.15, metalness: 0.4 });
+  for (const side of ['Left', 'Right']) {
+    const foot = find(side + 'Foot'), toe = find(side + 'ToeBase'); if (!foot || !toe) continue;
+    const f = foot.getWorldPosition(new THREE.Vector3()), t = toe.getWorldPosition(new THREE.Vector3()), fwd = t.clone().sub(f); fwd.y = 0; fwd.normalize();
+    const sc = root.getWorldScale(new THREE.Vector3()).y / 1.9, bow = new THREE.Group();          // sized for her at her usual size
+    for (const sx of [-1, 1]) { const loop = new THREE.Mesh(new THREE.SphereGeometry(1, 12, 8), silk); loop.scale.set(0.034, 0.02, 0.014); loop.position.set(sx * 0.033, 0, 0); loop.rotation.z = sx * 0.35; loop.castShadow = true; bow.add(loop);
+      const tail = new THREE.Mesh(new THREE.SphereGeometry(1, 8, 6), silk); tail.scale.set(0.012, 0.026, 0.008); tail.position.set(sx * 0.018, -0.024, 0.004); tail.rotation.z = -sx * 0.5; bow.add(tail); }
+    const gem = new THREE.Mesh(new THREE.SphereGeometry(0.014, 12, 8), pearl); gem.position.z = 0.006; bow.add(gem);
+    bow.scale.setScalar(sc * 0.85); bow.position.copy(t).addScaledVector(fwd, BOW.fwd * sc); bow.position.y += BOW.up * sc;
+    bow.lookAt(bow.position.clone().add(fwd).add(new THREE.Vector3(0, 0.9, 0)));                    // facing up and forward, lying on the slope of the toe
+    bow.updateMatrixWorld(true); toe.attach(bow);
+  }
+}
+const BOW = { up: 0.052, fwd: -0.012 };                        // where the bow sits from the joint of her toes, in metres at her own size
 const SHOE_TOP = 0.03;                                       // how far above her ankles her shoes come, as a part of her height
 function dressKid(root) {
   let mesh = null; root.traverse(o => { if (o.isSkinnedMesh && !mesh) mesh = o; });
@@ -352,7 +370,7 @@ function dressKid(root) {
     const face = h > 0.93 && o < 0.055 && (dep[a] + dep[b] + dep[c]) / 3 > 0;                               // eyes, brows and mouth are dark too, and stay as they are
     const tips = h > 0.76 && o < 0.3 && !face ? Math.pow(Math.min(1, Math.max(0, (1.075 - h) / 0.2)), 1.3) : 0;   // black at the roots, fading to purple down the length                     // the lower lengths of her hair
     if (tips > 0) { const q8 = Math.round(tips * 255); hm.fillStyle = hm.strokeStyle = 'rgb(' + q8 + ',' + q8 + ',' + q8 + ')'; hm.beginPath(); for (const q of [a, b, c]) { const x = uv.getX(q) * W, y = (map.flipY ? 1 - uv.getY(q) : uv.getY(q)) * H; q === a ? hm.moveTo(x, y) : hm.lineTo(x, y); } hm.closePath(); hm.fill(); hm.stroke(); }
-    if (h < SHOE_TOP) { m.fillStyle = m.strokeStyle = 'rgb(0,0,255)'; m.beginPath(); for (const q of [a, b, c]) { const x = uv.getX(q) * W, y = (map.flipY ? 1 - uv.getY(q) : uv.getY(q)) * H; q === a ? m.moveTo(x, y) : m.lineTo(x, y); } m.closePath(); m.fill(); m.stroke(); continue; }   // her shoes
+    if (h < SHOE_TOP) { m.fillStyle = m.strokeStyle = h < -0.052 ? 'rgb(0,0,110)' : 'rgb(0,0,255)'; m.beginPath(); for (const q of [a, b, c]) { const x = uv.getX(q) * W, y = (map.flipY ? 1 - uv.getY(q) : uv.getY(q)) * H; q === a ? m.moveTo(x, y) : m.lineTo(x, y); } m.closePath(); m.fill(); m.stroke(); continue; }   // her shoes
     const skirt = h > 0.25 && h < 0.66 && o < 0.26, bodice = h > 0.58 && h < 0.965 && o < 0.225; if (!skirt && !bodice) continue;
     const belt = !skirt && h < 0.76 && o < 0.2;                  // the band at her waist, just above where the skirt starts
     m.fillStyle = m.strokeStyle = 'rgb(' + (skirt ? 255 : 0) + ',' + (bodice ? 255 : 0) + ',' + (belt ? 255 : 0) + ')';
@@ -364,9 +382,12 @@ function dressKid(root) {
       const mx0 = Math.max(d[i], d[i + 1], d[i + 2]), mn0 = Math.min(d[i], d[i + 1], d[i + 2]);
       if (mx0 < 84 && mx0 - mn0 < 30) { const k = hp[i] / 255, L0 = (d[i] + d[i + 1] + d[i + 2]) / 765; d[i] += (Math.min(255, 128 + 560 * L0) - d[i]) * k; d[i + 1] += (Math.min(255, 52 + 340 * L0) - d[i + 1]) * k; d[i + 2] += (Math.min(255, 226 + 200 * L0) - d[i + 2]) * k; if (k > 0.97) { HAIR_DYE[0] += d[i]; HAIR_DYE[1] += d[i + 1]; HAIR_DYE[2] += d[i + 2]; HAIR_DYE[3]++; } continue; }
     }
-    if (mp[i + 2] > 128 && mp[i] < 128 && mp[i + 1] < 128) {     // shoes: the dress's purple, their shading kept
+    if (mp[i + 2] > 70 && mp[i] < 128 && mp[i + 1] < 128) {      // shoes: the dress's purple, their shading kept
       const mx1 = Math.max(d[i], d[i + 1], d[i + 2]), mn1 = Math.min(d[i], d[i + 1], d[i + 2]);
-      if (mx1 < 62 || (mx1 - mn1) / mx1 < 0.25) { const t = Math.min(1, (d[i] + d[i + 1] + d[i + 2]) / 765 * 1.6); d[i] = 120 + 70 * t; d[i + 1] = 66 + 70 * t; d[i + 2] = 214 + 36 * t; }
+      if (mx1 < 62 || (mx1 - mn1) / mx1 < 0.25) { const t = Math.min(1, (d[i] + d[i + 1] + d[i + 2]) / 765 * 1.6), part = mp[i + 2];
+        if (part < 145) { d[i] = 52 + 30 * t; d[i + 1] = 22 + 20 * t; d[i + 2] = 108 + 40 * t; }                 // sole
+        else if (part < 218) { d[i] = 226 + 20 * t; d[i + 1] = 206 + 30 * t; d[i + 2] = 255; }                    // piping
+        else { d[i] = 112 + 60 * t; d[i + 1] = 56 + 60 * t; d[i + 2] = 212 + 38 * t; } }
       continue;
     }
     const skirt = mp[i] > 128, bodice = mp[i + 1] > 128; if (!skirt && !bodice) continue;
