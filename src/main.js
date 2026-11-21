@@ -1006,19 +1006,19 @@ const play = { swing: null, hammock: null, spots: [] };
           const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setIndex(idx);
           const lid = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ colorWrite: false, side: THREE.DoubleSide })); lid.renderOrder = -1; boat.add(lid); }
       }
-      const bp = on(toMeadow + 0.5, 25); boat.position.set(bp.x, BAY.level + 0.12, bp.z); boat.rotation.y = 0.8; scene.add(boat);
-      play.deco.push({ kind: 'boat', o: boat, ph: 1.3, x: bp.x, z: bp.z });
+      const SEA = BAY.level > -50;                              // the boat, windbreak and sandcastle belong to a shore: with no sea they stay away
+      if (SEA) { const bp = on(toMeadow + 0.5, 25); boat.position.set(bp.x, BAY.level + 0.12, bp.z); boat.rotation.y = 0.8; scene.add(boat); play.deco.push({ kind: 'boat', o: boat, ph: 1.3, x: bp.x, z: bp.z }); }
       for (const [da, r, len, turn] of [[0.25, 36.5, 3.2, 0.4], [-0.35, 37.5, 2.2, 1.9], [0.9, 36, 2.6, 2.6]]) {
         const p = on(toMeadow + da, r), a = turn, log = bar(V(p.x - Math.cos(a) * len / 2, p.y + 0.16, p.z - Math.sin(a) * len / 2), V(p.x + Math.cos(a) * len / 2, p.y + 0.2, p.z + Math.sin(a) * len / 2), 0.17, MAT.wood); scene.add(log);
         play.spots.push({ x: p.x, z: p.z, r: 0.7 });
       }
       for (let k = 0; k < 16; k++) { const p = on(toMeadow + (k * 0.618 % 1 - 0.5) * 2.6, 33 + (k * 0.37 % 1) * 6), st = new THREE.Mesh(sphereGeo, MAT.stone); const sz = 0.16 + (k * 0.29 % 1) * 0.3; st.scale.set(sz * 1.4, sz * 0.6, sz); st.position.set(p.x, p.y + sz * 0.2, p.z); st.rotation.y = k; st.castShadow = true; scene.add(st); }
       // a windbreak: striped cloth between three poles
-      { const p0 = on(toMeadow - 0.12, 38.2), p1 = on(toMeadow + 0.02, 38.6), p2 = on(toMeadow + 0.14, 38);
+      if (SEA) { const p0 = on(toMeadow - 0.12, 38.2), p1 = on(toMeadow + 0.02, 38.6), p2 = on(toMeadow + 0.14, 38);
         for (const p of [p0, p1, p2]) scene.add(bar(V(p.x, p.y - 0.1, p.z), V(p.x, p.y + 1.5, p.z), 0.05, MAT.wood));
         for (const [a, b] of [[p0, p1], [p1, p2]]) for (let k = 0; k < 6; k++) { const m = new THREE.Mesh(new THREE.PlaneGeometry(a.distanceTo(b), 0.2), new THREE.MeshStandardMaterial({ map: clothTex, color: k % 2 ? 0xf6efe0 : COLS[0], side: THREE.DoubleSide, roughness: 0.95 })); m.position.set((a.x + b.x) / 2, a.y + 0.25 + k * 0.2, (a.z + b.z) / 2); m.rotation.y = Math.atan2(-(b.z - a.z), b.x - a.x); m.castShadow = true; scene.add(m); } }
       // somebody's sandcastle
-      { const p = on(toMeadow + 0.42, 36.8), SAND2 = new THREE.MeshStandardMaterial({ color: 0xe6cf96, roughness: 1 });
+      if (SEA) { const p = on(toMeadow + 0.42, 36.8), SAND2 = new THREE.MeshStandardMaterial({ color: 0xe6cf96, roughness: 1 });
         for (const [dx, dz, r, h] of [[0, 0, 0.42, 0.5], [-0.5, -0.4, 0.17, 0.42], [0.5, -0.4, 0.17, 0.42], [-0.5, 0.4, 0.17, 0.42], [0.5, 0.4, 0.17, 0.42]]) { const m = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.72, r, h, 14), SAND2); m.position.set(p.x + dx, p.y + h / 2, p.z + dz); m.castShadow = true; scene.add(m); } }
     }
     const c = at(0, 0);                                         // a big bunch on a tall pole over the middle of the playground, seen from across the meadow

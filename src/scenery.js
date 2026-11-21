@@ -79,10 +79,10 @@ export function valley2At(t, side = 0) {
   const V = VALLEY2, off = side - V.wind * Math.sin(t * V.k);
   return { x: V.ux * t - V.uz * off, z: V.uz * t + V.ux * off };
 }
-// The cove at the end of it: the ground dips below the water in the middle and comes up through a strip of sand.
-export const BAY = { ...valley2At(138), r: 40, edge: 62, level: -0.35, deep: -3.2, shore: 32.3 };
+// The dell at the end of it: a wide grassy hollow ringed by the hills. (It was a cove once: `level` far below the ground means there is no water in it.)
+export const BAY = { ...valley2At(138), r: 40, edge: 62, level: -99, deep: -1.7, rise: 2.0, shore: 32.3 };
 const bayMask = (x, z) => 1 - sstep(BAY.r, BAY.edge, Math.hypot(x - BAY.x, z - BAY.z));
-const bayFloor = r => BAY.deep + 3.5 * sstep(14, BAY.r, r);
+const bayFloor = r => BAY.deep + BAY.rise * sstep(6, BAY.r, r);
 export const CASTLE = { x: 0, z: -112, y: 9, flat: 46, edge: 70 };   // a levelled hilltop beyond the far side of the meadow
 const castleMask = (x, z) => 1 - sstep(CASTLE.flat, CASTLE.edge, Math.hypot(x - CASTLE.x, z - CASTLE.z));
 export const PLAYGROUND = { ...valleyAt(62), r: 12.5 };       // a round of bare ground in the valley: no grass grows on it
@@ -107,7 +107,7 @@ const HILL_GLSL = `float hillH(vec2 p) {
     float vale2 = step(0.0, wt) * (1.0 - smoothstep(${VALLEY2.flat.toFixed(1)}, ${VALLEY2.wall.toFixed(1)}, abs(ws))) * (1.0 - smoothstep(${VALLEY2.end0.toFixed(1)}, ${VALLEY2.end1.toFixed(1)}, wt));
     float bd = distance(p, vec2(${BAY.x.toFixed(2)}, ${BAY.z.toFixed(2)})), bm = 1.0 - smoothstep(${BAY.r.toFixed(1)}, ${BAY.edge.toFixed(1)}, bd);
     float h = smoothstep(${HILL_IN.toFixed(1)}, ${HILL_OUT.toFixed(1)}, d) * (5.0 + 16.0 * roll + 9.0 * wave) * (1.0 - max(vale, vale2)) * (1.0 - cm) + ${CASTLE.y.toFixed(1)} * cm;
-    return mix(h, ${BAY.deep.toFixed(1)} + 3.5 * smoothstep(14.0, ${BAY.r.toFixed(1)}, bd), bm);
+    return mix(h, ${BAY.deep.toFixed(1)} + ${BAY.rise.toFixed(1)} * smoothstep(6.0, ${BAY.r.toFixed(1)}, bd), bm);
   }`;
 
 const LAND = { meadow: new THREE.Color(0x48a838), sunny: new THREE.Color(0x86cf48), wood: new THREE.Color(0x2c8040), high: new THREE.Color(0x4f9a78), sand: new THREE.Color(0xf0dca6), wet: new THREE.Color(0xc9ad76), bed: new THREE.Color(0x3f8f8a) };
@@ -176,7 +176,7 @@ function hills() {
     const d = R * 0.985 + (OUT - R * 0.985) * Math.pow(i / RINGS, 1.7);
     for (let j = 0; j <= SEGS; j++) {
       const a = j / SEGS * Math.PI * 2, x = Math.cos(a) * d, z = Math.sin(a) * d, y = hillHeight(x, z);
-      pos.push(x, y + 0.006 - 2.6 * bayMask(x, z) * sstep(BAY.edge, BAY.edge - 6, Math.hypot(x - BAY.x, z - BAY.z)), z);   // sunk out of sight where the cove's own ground lies over it
+      pos.push(x, y + 0.006, z);
       landColor(c, x, z, y, d);
       col.push(c.r, c.g, c.b);
     }
@@ -523,7 +523,6 @@ function grassField(r, U, o) {
         float ramp = smoothstep(${f(o.range[0])}, ${f(o.range[1])}, dC);
         float keep = ${o.mode === 'near' ? 'clamp((1.0 - ramp - hsh) * 5.0, 0.0, 1.0)' : `clamp((ramp - hsh) * 5.0, 0.0, 1.0) * (1.0 - smoothstep(${f(o.fadeOut[0])}, ${f(o.fadeOut[1])}, dC))`} * step(length(wp), ${f(ROAM + 30)});
         ground = hillH(wp);
-        keep *= smoothstep(${f(BAY.r - 1.5)}, ${f(BAY.r + 2.5)}, distance(wp, vec2(${f(BAY.x)}, ${f(BAY.z)})));
         keep *= 1.0 - step(abs(wp.x - ${f(CASTLE.x)}), 26.3) * step(abs(wp.y - ${f(CASTLE.z)}), 26.3);
         keep *= smoothstep(${f(PLAYGROUND.r - 1.2)}, ${f(PLAYGROUND.r + 0.8)}, distance(wp, vec2(${f(PLAYGROUND.x)}, ${f(PLAYGROUND.z)})));
         keep *= mix(1.0, step(fract(hsh * 7.31), 0.05), uSnow);                       // winter: only a few dry stalks show through the snow
@@ -877,7 +876,6 @@ export function buildScenery(scene) {
   const LEAVES_PER = foliage.userData.full / trees.length;   // leaves are laid down tree by tree, so the last trees can simply go without
   foliage.userData.full = Math.round(LEAVES_PER * (trees.length - 4)); foliage.count = foliage.userData.full;
   const land = hills(); scene.add(land);
-  scene.add(cove(), seaWater(U));
   const woods = hillWoods(r, U, bareGeos[0]); scene.add(woods);
   let detailQ = 1, lodT = -1;
   for (let i = 0; i < 46; i++) {                             // rounded boulders, a few big ones
