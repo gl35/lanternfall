@@ -245,7 +245,7 @@ const WING = { scale: 1.15, root: 0.05 };                     // how big they ar
 // One for each copy of her (the one who wanders, and the one he steers). Built the first time her bones are there to measure her by.
 const cloakP = new THREE.Vector3(), CLOAK = { COLS: 13, ROWS: 14 };
 const kidCloak = { back: -1, mesh: null }, heroCloak = { back: 1, mesh: null };       // which way her back is, along z, in the group each hangs in
-const hairTip = new THREE.Color().setRGB(0.7, 0.42, 0.97, THREE.SRGBColorSpace), HAIR = { COLS: 18, ROWS: 14 }, kidHair = { back: -1, mesh: null }, heroHair = { back: 1, mesh: null };
+const HAIR_TONE = 1, hairTip = new THREE.Color().setRGB(0.7, 0.42, 0.97, THREE.SRGBColorSpace), HAIR = { COLS: 18, ROWS: 14 }, kidHair = { back: -1, mesh: null }, heroHair = { back: 1, mesh: null };
 function hairUpdate(C, parent, bones, flow, T) {
   const nb = bones.Neck || bones.Spine2; if (!nb) return;
   parent.worldToLocal(nb.bone.getWorldPosition(cloakP));
@@ -254,7 +254,8 @@ function hairUpdate(C, parent, bones, flow, T) {
     C.N = cloakP.y; const n = (HAIR.COLS + 1) * (HAIR.ROWS + 1), col = new Float32Array(n * 3), uv = new Float32Array(n * 2), idx = [], c = new THREE.Color();
     for (let r = 0; r <= HAIR.ROWS; r++) for (let q = 0; q <= HAIR.COLS; q++) {
       const t = r / HAIR.ROWS, k = r * (HAIR.COLS + 1) + q, lock = 0.86 + 0.28 * (((q * 7919) % 13) / 13);                     // each lock a shade of its own
-      c.setRGB(0.6, 0.26, 0.92, THREE.SRGBColorSpace).lerp(hairTip, Math.pow(t, 0.9)).multiplyScalar(0.93 + (lock - 1) * 0.5); c.toArray(col, k * 3);
+      if (HAIR_DYE[3]) c.setRGB(HAIR_DYE[0] / HAIR_DYE[3] / 255, HAIR_DYE[1] / HAIR_DYE[3] / 255, HAIR_DYE[2] / HAIR_DYE[3] / 255, THREE.SRGBColorSpace); else c.setRGB(0.55, 0.24, 0.9, THREE.SRGBColorSpace);
+      c.multiplyScalar(HAIR_TONE * (1 + (lock - 1) * 0.35)); c.toArray(col, k * 3);
       uv[k * 2] = q / HAIR.COLS * 5; uv[k * 2 + 1] = t;
       if (r < HAIR.ROWS && q < HAIR.COLS) { const b = k + HAIR.COLS + 1; idx.push(k, k + 1, b, k + 1, b + 1, b); }
     }
@@ -314,6 +315,7 @@ function cloakUpdate(C, parent, bones, flow, T) {
 }
 // Her clothes are part of her one skin and one picture, so the dress is painted into that picture: every cloth-coloured
 // (white, grey or black) bit of it that lies on her body between her shoulders and the hem of her skirt. Skin and hair are left alone.
+const HAIR_DYE = [0, 0, 0, 0];                                // the sum of every fully dyed bit of her hair, and how many
 function dressKid(root) {
   let mesh = null; root.traverse(o => { if (o.isSkinnedMesh && !mesh) mesh = o; });
   if (!mesh || !mesh.material.map || !mesh.material.map.image || !mesh.skeleton) return;
@@ -343,7 +345,7 @@ function dressKid(root) {
   for (let i = 0; i < d.length; i += 4) {
     if (hp[i] > 8 && !(mp[i + 2] > 128)) {                   // hair is the dark there: dyed purple toward the ends, the strands kept
       const mx0 = Math.max(d[i], d[i + 1], d[i + 2]), mn0 = Math.min(d[i], d[i + 1], d[i + 2]);
-      if (mx0 < 84 && mx0 - mn0 < 30) { const k = hp[i] / 255, L0 = (d[i] + d[i + 1] + d[i + 2]) / 765; d[i] += (Math.min(255, 128 + 560 * L0) - d[i]) * k; d[i + 1] += (Math.min(255, 52 + 340 * L0) - d[i + 1]) * k; d[i + 2] += (Math.min(255, 226 + 200 * L0) - d[i + 2]) * k; continue; }
+      if (mx0 < 84 && mx0 - mn0 < 30) { const k = hp[i] / 255, L0 = (d[i] + d[i + 1] + d[i + 2]) / 765; d[i] += (Math.min(255, 128 + 560 * L0) - d[i]) * k; d[i + 1] += (Math.min(255, 52 + 340 * L0) - d[i + 1]) * k; d[i + 2] += (Math.min(255, 226 + 200 * L0) - d[i + 2]) * k; if (k > 0.97) { HAIR_DYE[0] += d[i]; HAIR_DYE[1] += d[i + 1]; HAIR_DYE[2] += d[i + 2]; HAIR_DYE[3]++; } continue; }
     }
     const skirt = mp[i] > 128, bodice = mp[i + 1] > 128; if (!skirt && !bodice) continue;
     const r = d[i], gg = d[i + 1], b = d[i + 2], mx = Math.max(r, gg, b), mn = Math.min(r, gg, b), L = (r + gg + b) / 765, cloth = mx < 62 || (mx - mn) / mx < 0.2;
