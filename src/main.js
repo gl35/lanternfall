@@ -245,7 +245,7 @@ const WING = { scale: 1.15, root: 0.05 };                     // how big they ar
 // One for each copy of her (the one who wanders, and the one he steers). Built the first time her bones are there to measure her by.
 const cloakP = new THREE.Vector3(), CLOAK = { COLS: 13, ROWS: 14 };
 const kidCloak = { back: -1, mesh: null }, heroCloak = { back: 1, mesh: null };       // which way her back is, along z, in the group each hangs in
-const HAIR_TONE = 1, hairTip = new THREE.Color().setRGB(0.7, 0.42, 0.97, THREE.SRGBColorSpace), HAIR = { COLS: 18, ROWS: 14 }, kidHair = { back: -1, mesh: null }, heroHair = { back: 1, mesh: null };
+const hairQ = new THREE.Quaternion(), hairP = new THREE.Quaternion(), hairV = new THREE.Vector3(), HAIR_TONE = 1, hairTip = new THREE.Color().setRGB(0.7, 0.42, 0.97, THREE.SRGBColorSpace), HAIR = { COLS: 18, ROWS: 14 }, kidHair = { back: -1, mesh: null }, heroHair = { back: 1, mesh: null };
 function hairUpdate(C, parent, bones, flow, T) {
   const nb = bones.Neck || bones.Spine2; if (!nb) return;
   parent.worldToLocal(nb.bone.getWorldPosition(cloakP));
@@ -276,14 +276,21 @@ function hairUpdate(C, parent, bones, flow, T) {
   }
   C.mesh.position.copy(cloakP);
   const N = C.N, u = N / 1.53, L = 0.48 * u, p = C.mesh.geometry.attributes.position, bk = C.back;       // u: her own size, with the measures below taken from her model
+  // how her neck has turned from where it was when the hair was made: the top of the long hair turns with it, exactly as her own hair does
+  nb.bone.getWorldQuaternion(hairQ); parent.getWorldQuaternion(hairP); hairQ.premultiply(hairP.invert());
+  if (!C.q0) C.q0 = hairQ.clone().invert();
+  hairQ.multiply(C.q0);
   for (let r = 0; r <= HAIR.ROWS; r++) for (let q = 0; q <= HAIR.COLS; q++) {
     const t = r / HAIR.ROWS, cc = q / HAIR.COLS * 2 - 1, k = t * L, e = t * t * (3 - 2 * t);
     const ang = cc * (1.5 - 0.5 * e), rx = (0.228 - 0.093 * e) * u, rz = (0.163 - 0.063 * e) * u, ends = r === HAIR.ROWS ? (((q * 31) % 7) / 7) * 0.05 * L : 0;
-    const wave = Math.sin(T * 2.6 + t * 3.6 + cc * 1.9) * 0.018 + Math.sin(T * 1.5 + cc * 2.4) * 0.009;
+    const wave = (Math.sin(T * 2.6 + t * 3.6 + cc * 1.9) * 0.018 + Math.sin(T * 1.5 + cc * 2.4) * 0.009) * (0.25 + 0.75 * flow);   // standing still it hardly stirs, as hers does not
+    const bx = Math.sin(ang) * rx, by = -0.035 * u - k - ends, bz = bk * Math.cos(ang) * rz;
+    hairV.set(bx, by, bz).applyQuaternion(hairQ);              // where this bit would be if it were stuck to her neck like her own hair
+    const w = 1 - Math.min(1, Math.max(0, (t - 0.12) / 0.6)), loose = 1 - w * w * (3 - 2 * w);   // the top is held to her, the length hangs and flows more and more freely
     p.setXYZ(r * (HAIR.COLS + 1) + q,
-      Math.sin(ang) * rx + Math.sin(T * 1.9 + t * 3) * 0.012 * k * (1 + flow),
-      -0.035 * u - k - ends + flow * 0.14 * t * k,
-      bk * (Math.cos(ang) * rz + (wave + flow * 0.4 * t) * k));
+      hairV.x + (bx - hairV.x) * loose * 0.5 + Math.sin(T * 1.9 + t * 3) * 0.012 * k * flow * loose,
+      hairV.y + (by - hairV.y) * loose * 0.5 + flow * 0.14 * t * k * loose,
+      hairV.z + (bz - hairV.z) * loose * 0.5 + bk * (wave + flow * 0.4 * t) * k * loose);
   }
   p.needsUpdate = true; C.mesh.geometry.computeVertexNormals();
 }
