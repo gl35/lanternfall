@@ -1463,7 +1463,7 @@ function updateHills(dt) {
   }
 }
 
-const SELF_FLIGHT = false;                                  // the kid flies only on her dragon now; true lets her flap into the air herself again
+const SELF_FLIGHT = true;                                   // the kid can still flap into the air herself, wingless; false leaves flying to the dragon
 function jump() {
   if (player.ride === 'dragon') { if (state !== 'play') return false; play.dragon.vy = 7.6; sfx.whoosh(0.2); return true; }   // a beat of the wings
   if (player.ride) { playerDismount(); return true; }
