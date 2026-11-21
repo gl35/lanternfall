@@ -356,7 +356,7 @@ function shoeBows(root) {
   }
 }
 const BOW = { up: 0.052, fwd: -0.012 };                        // where the bow sits from the joint of her toes, in metres at her own size
-const SHOE = { side: 0.33, vamp: 0.58, rise: 0.85, heel: 0.4, strap: 0.37, strapW: 0.04 };   // the cut of the shoe: side height, where the toe cover starts and how far it rises, heel height, the strap
+const SHOE = { side: 0.33, vamp: 0.64, rise: 0.85, heel: 0.4, strap: 0.4, strapW: 0.058 };   // the cut of the shoe: side height, where the toe cover starts and how far it rises, heel height, the strap
 const SHOE_TOP = 0.03;                                       // how far above her ankles her shoes come, as a part of her height
 function dressKid(root) {
   let mesh = null; root.traverse(o => { if (o.isSkinnedMesh && !mesh) mesh = o; });
@@ -414,9 +414,10 @@ function dressKid(root) {
     if (mp[i + 2] > 70 && mp[i] < 128 && mp[i + 1] < 128) {
       const at = i / 4, f = sF[at] < 0 ? 0.3 : sF[at], hh = sF[at] < 0 ? 0.95 : sH[at], sh = 0.86 + 0.28 * Math.min(1, (d[i] + d[i + 1] + d[i + 2]) / 300), weave = ((at % W) + Math.floor(at / W)) % 2 ? 1.03 : 0.97;
       const edge = SHOE.side + SHOE.rise * Math.pow(Math.max(0, (f - SHOE.vamp) / (1 - SHOE.vamp)), 0.7) + SHOE.heel * Math.pow(Math.max(0, 1 - f / 0.22), 1.5);   // how high the upper comes at this point along the foot
-      const strap = Math.abs(f - SHOE.strap) < SHOE.strapW && hh < 0.82, upper = hh < edge || strap || f > 0.86;
+      const sd = Math.abs(f - SHOE.strap), strap = sd < SHOE.strapW && hh < 0.86 && hh >= edge - 0.02, button = sd < 0.02 && hh > 0.36 && hh < 0.5, upper = hh < edge || strap || f > 0.86;
       if (hh < 0.13) { d[i] = 198 * sh; d[i + 1] = 166 * sh; d[i + 2] = 122 * sh; }                                 // the sole
-      else if (upper) { const trim = !strap && f <= 0.86 && hh > edge - 0.05 ? 1.1 : 1; d[i] = Math.min(255, 182 * sh * weave * trim); d[i + 1] = Math.min(255, 164 * sh * weave * trim); d[i + 2] = Math.min(255, 214 * sh * weave * trim); }
+      else if (button) { d[i] = 236; d[i + 1] = 212; d[i + 2] = 156; }                                                  // a little brass button where the strap fastens
+      else if (upper) { const trim = strap ? (sd > SHOE.strapW - 0.014 ? 0.74 : 1.12) : f <= 0.86 && hh > edge - 0.05 ? 1.1 : 1; d[i] = Math.min(255, 182 * sh * weave * trim); d[i + 1] = Math.min(255, 164 * sh * weave * trim); d[i + 2] = Math.min(255, 214 * sh * weave * trim); }
       else { d[i] = 17; d[i + 1] = 17; d[i + 2] = 21; }                                                               // cut away: her sock
       continue;
     }
