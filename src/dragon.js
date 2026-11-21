@@ -2,6 +2,8 @@
 // a lean body on fine legs, swept golden horns, and wide scalloped wings that beat in the air and fold on the ground.
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 
 function scaleBump() {                                       // overlapping rows of small scales, as a height map
   const c = document.createElement('canvas'); c.width = c.height = 256;
@@ -14,7 +16,9 @@ function scaleBump() {                                       // overlapping rows
   const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(7, 5); return t;
 }
 
-export function buildDragon(renderer) {
+// With a model file given, that model is the dragon: the built one below stands in only until it has loaded (or if it fails to).
+export const DRAGON_FIT = { span: 10, turn: -Math.PI / 2, level: 0.85, seat: [0.6, 0.06], mouth: [0.75, 0.47], hinge: [0.75, 0.56] };   // hinge: how far out from her spine the wings start to swing (metres), and how high (part of her height)   // how long she is made; which way the model faces; where the kid sits and where the fire leaves, as parts of her height and length
+export function buildDragon(renderer, url) {
   const pm = new THREE.PMREMGenerator(renderer), env = pm.fromScene(new RoomEnvironment(), 0.04).texture; pm.dispose();
   const bump = scaleBump();
   const hide = new THREE.MeshPhysicalMaterial({ color: 0x6f2fe0, metalness: 0.9, roughness: 0.22, envMap: env, envMapIntensity: 1.5, bumpMap: bump, bumpScale: 1.4, clearcoat: 1, clearcoatRoughness: 0.12, iridescence: 0.7, iridescenceIOR: 1.7 });
@@ -168,5 +172,44 @@ export function buildDragon(renderer) {
     model.rotation.set(THREE.MathUtils.clamp(-st.vy * 0.035, -0.32, 0.32) * a, 0, -st.turn * 0.42 * a);
   }
   update(0, { air: 0, speed: 0, vy: 0, turn: 0, ridden: false });
-  return { root, update, mouth, env, seat: { y: 1.9 * S, z: 0.5 * S } };
+  const api = { root, update, mouth, env, seat: { y: 1.9 * S, z: 0.5 * S }, glb: null, bones: {} };
+  if (url) new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).load(url, g => {
+    const m = g.scene, box = new THREE.Box3().setFromObject(m), size = box.getSize(new THREE.Vector3()), k = DRAGON_FIT.span / Math.max(size.x, size.z);
+    const H = size.y * k, L = Math.min(size.x, size.z) * k, pivot = H * 0.5;             // H: how tall she stands; L: nose to tail
+    // tilt: the whole of her, turning about her middle, with the kid's seat and the mouth going with it; holder: the model, sized and faced forward
+    const tilt = new THREE.Group(), holder = new THREE.Group(); tilt.position.y = pivot; root.add(tilt);
+    m.position.set(-(box.min.x + box.max.x) / 2, -box.min.y, -(box.min.z + box.max.z) / 2); holder.add(m); holder.scale.setScalar(k); holder.rotation.y = DRAGON_FIT.turn; holder.position.y = -pivot; tilt.add(holder);
+    m.traverse(o => { if (o.isMesh) { o.castShadow = true; o.frustumCulled = false; o.material.envMap = env; o.material.envMapIntensity = 1.3; o.material.needsUpdate = true; } if (o.isBone) api.bones[o.name.replace(/^mixamorig:?/, '')] = { bone: o, bind: o.quaternion.clone() }; });
+    model.visible = false; api.glb = holder; api.tilt = tilt; api.size = { H, L };
+    // her body is not in the middle of her wings as modelled: she is slid across so her spine is on the centre line
+    root.updateMatrixWorld(true); if (api.bones.Hips) { const hp = tilt.worldToLocal(api.bones.Hips.bone.getWorldPosition(new THREE.Vector3())); holder.position.x -= hp.x; }
+    // her wings beat: everything out beyond her shoulders swings up and down about a hinge line along each side of her body
+    const wing = { uTilt: { value: new THREE.Matrix4() }, uInvTilt: { value: new THREE.Matrix4() }, uFlap: { value: 0 }, uHinge: { value: new THREE.Vector2(DRAGON_FIT.hinge[0], H * DRAGON_FIT.hinge[1] - pivot) } };
+    m.traverse(o => { if (!o.isMesh) return; o.material.onBeforeCompile = sh => {
+      Object.assign(sh.uniforms, wing);
+      sh.vertexShader = 'uniform mat4 uTilt, uInvTilt; uniform float uFlap; uniform vec2 uHinge;\n' + sh.vertexShader.replace('#include <project_vertex>', `
+        vec4 tp = uInvTilt * (modelMatrix * vec4(transformed, 1.0));
+        float sd = sign(tp.x), ax = abs(tp.x), wgt = smoothstep(uHinge.x, uHinge.x + 1.2, ax), ang = uFlap * wgt * (0.75 + 0.25 * smoothstep(1.5, 4.5, ax));
+        float dx = ax - uHinge.x, dy = tp.y - uHinge.y, cs = cos(ang), sn = sin(ang);
+        tp.x = sd * (uHinge.x + dx * cs - dy * sn); tp.y = uHinge.y + dx * sn + dy * cs;
+        vec4 mvPosition = viewMatrix * (uTilt * tp);
+        gl_Position = projectionMatrix * mvPosition;`);
+    }; o.material.needsUpdate = true; });
+    api.flap = (beat, air, tt) => { tilt.updateMatrixWorld(true); wing.uTilt.value.copy(tilt.matrixWorld); wing.uInvTilt.value.copy(tilt.matrixWorld).invert(); wing.uFlap.value = air * (0.08 + 0.5 * beat) + (1 - air) * (-0.12 + 0.04 * Math.sin(tt * 1.3)); };
+    api.seat = { y: H * DRAGON_FIT.seat[0] - pivot, z: L * DRAGON_FIT.seat[1] };
+    const mo = new THREE.Object3D(); mo.position.set(0, H * DRAGON_FIT.mouth[0] - pivot, L * DRAGON_FIT.mouth[1]); tilt.add(mo); api.mouth = mo;
+    let tt = 0, air = 0, ph = 0, glide = 0;
+    const E = new THREE.Euler(), Q = new THREE.Quaternion(), turnBone = (n, x, y, z) => { const bn = api.bones[n]; if (bn) bn.bone.quaternion.copy(bn.bind).multiply(Q.setFromEuler(E.set(x, y, z))); };
+    api.turnBone = turnBone;
+    api.update = (dt, st) => {
+      tt += dt; air += ((st.air ? 1 : 0) - air) * Math.min(1, dt * 3); glide += ((st.glide ? 1 : 0) - glide) * Math.min(1, dt * 2.5);
+      ph += dt * (air > 0.5 ? (5.2 + Math.max(0, st.vy) * 0.5) * (1 - 0.6 * glide) : 1.2);
+      const beat = Math.sin(ph) * (1 - 0.6 * glide);
+      // she stands reared up on the ground and levels out to fly, rising and dipping with each beat, nosing up to climb and leaning into her turns
+      tilt.position.y = pivot + air * (-0.2 * beat) + (1 - air) * Math.sin(tt * 1.6) * 0.02;
+      tilt.rotation.set(air * DRAGON_FIT.level + THREE.MathUtils.clamp(-st.vy * 0.04, -0.35, 0.35) * air + (1 - air) * Math.sin(tt * 1.6) * 0.012, 0, -st.turn * 0.45 * air, 'YXZ');
+      if (api.flap) api.flap(beat, air, tt, st);
+    };
+  }, undefined, e => console.warn('dragon model not loaded', e));
+  return api;
 }

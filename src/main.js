@@ -1273,7 +1273,7 @@ const play = { swing: null, hammock: null, spots: [] };
 const RIDES = ['swing', 'hammock', 'round', 'seesaw', 'slide', 'bars', 'sand', 'boat', 'dragon'];
 // Her dragon waits in the meadow. Walking into it climbs on; the stick walks it, the jump button beats its wings to take off and to climb,
 // and left alone in the air it glides down. Landed and standing still after a flight, she hops off.
-const dragon = buildDragon(renderer); scene.add(dragon.root);
+const dragon = buildDragon(renderer, import.meta.env.BASE_URL + 'models/dragon.glb'); scene.add(dragon.root);
 {
   let best = null, bd = -1;                                  // the most open spot not far from where the game starts
   for (let k = 0; k < 60; k++) {
@@ -1283,8 +1283,8 @@ const dragon = buildDragon(renderer); scene.add(dragon.root);
     d = Math.min(d, Math.hypot(x - START.x, z - START.z)); if (d > bd) { bd = d; best = { x, z }; }
   }
   dragon.root.position.set(best.x, hillHeight(best.x, best.z), best.z); dragon.root.rotation.y = Math.atan2(START.x - best.x, START.z - best.z);
-  play.dragon = { x: best.x, z: best.z, g: dragon.root, r: 1.9, seat: dragon.root, rider: false, pose: KID_POSE.hold, Y: dragon.root.position.y, alt: 0, vy: 0, vx: 0, vz: 0, turn: 0, still: 0, flew: false,
-    put(k) { k.position.set(0, dragon.seat.y - 0.93, dragon.seat.z); k.rotation.set(0, 0, 0); this.still = 0; this.flew = false; this.vx = this.vz = this.vy = 0; camYaw = Math.PI - dragon.root.rotation.y; },
+  play.dragon = { x: best.x, z: best.z, g: dragon.root, r: 1.9, get seat() { return dragon.tilt || dragon.root; }, rider: false, pose: KID_POSE.hold, Y: dragon.root.position.y, alt: 0, vy: 0, vx: 0, vz: 0, turn: 0, still: 0, flew: false,
+    put(k) { k.position.set(0, dragon.seat.y - 0.93, dragon.seat.z); this.seated = dragon.seat; k.rotation.set(0, 0, 0); this.still = 0; this.flew = false; this.vx = this.vz = this.vy = 0; camYaw = Math.PI - dragon.root.rotation.y; },
     get exit() { const h = dragon.root.rotation.y; return { x: this.x + Math.cos(h) * 2.7, z: this.z - Math.sin(h) * 2.7 }; } };
 }
 // Things alight: each burns with purple flame and a little smoke for a few seconds.
@@ -1369,6 +1369,7 @@ function updatePlay(dt) {
     {                                                        // the dragon: riderless it settles to the ground and waits
       const e = play.dragon;
       if (!e.rider) { const g = hillHeight(e.x, e.z); e.Y = Math.max(g, e.Y - 5 * dt); e.alt = e.Y - g; e.vx = e.vz = e.vy = 0; e.turn *= 0.9; e.g.position.y = e.Y; }
+      if (e.rider && e.seated !== dragon.seat) { e.seated = dragon.seat; e.seat.add(kid.group); kid.group.position.set(0, dragon.seat.y - 0.93, dragon.seat.z); }
       dragon.update(dt, { air: e.alt > 0.05, speed: Math.hypot(e.vx, e.vz), vy: e.vy, turn: e.turn, ridden: e.rider, fire: e.fire > 0, glide: e.rider && e.glide });
       if (e.fire > 0) {                                      // purple fire: a hot pale core widening into violet
         e.fire -= dt; dragon.mouth.getWorldPosition(fireP);
@@ -1953,7 +1954,7 @@ function frame(now) {
 // Scripted stepping for tests (the preview pane only runs frames while visible).
 window.game = {
   step(seconds = 1, dt = 1 / 60) { window.__manual = true; for (let t = 0; t < seconds; t += dt) step(dt); renderer.render(scene, camera); return this.state(); },
-  fling, jump, setHero, swapHero, beacons, motes, lightBeacon, debug: { castle, CASTLE, FLY_POSE, SIT_POSE, perches, scenery, WING, wings, WOODS, npc, kid, stand, stand2, play, KID_POSE, kidMount, kidDismount, scene, camera, hero, acts, THROW, THREE, player, sites, renderer, get mixer() { return mixer; } },
+  dragon, fling, jump, setHero, swapHero, beacons, motes, lightBeacon, debug: { castle, CASTLE, FLY_POSE, SIT_POSE, perches, scenery, WING, wings, WOODS, npc, kid, stand, stand2, play, KID_POSE, kidMount, kidDismount, scene, camera, hero, acts, THROW, THREE, player, sites, renderer, get mixer() { return mixer; } },
   walk(x, y) { window.__joy = x || y ? { x, y } : null; },
   setLevel(n) { level = n; buildLevel(); },
   setSeason(name) { scenery.setSeason(name); },
