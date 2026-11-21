@@ -255,15 +255,23 @@ function hairUpdate(C, parent, bones, flow, T) {
     for (let r = 0; r <= HAIR.ROWS; r++) for (let q = 0; q <= HAIR.COLS; q++) {
       const t = r / HAIR.ROWS, k = r * (HAIR.COLS + 1) + q, lock = 0.86 + 0.28 * (((q * 7919) % 13) / 13);                     // each lock a shade of its own
       if (HAIR_DYE[3]) c.setRGB(HAIR_DYE[0] / HAIR_DYE[3] / 255, HAIR_DYE[1] / HAIR_DYE[3] / 255, HAIR_DYE[2] / HAIR_DYE[3] / 255, THREE.SRGBColorSpace); else c.setRGB(0.55, 0.24, 0.9, THREE.SRGBColorSpace);
-      c.multiplyScalar(HAIR_TONE * (1 + (lock - 1) * 0.35)); c.toArray(col, k * 3);
-      uv[k * 2] = q / HAIR.COLS * 5; uv[k * 2 + 1] = t;
+      c.multiplyScalar(HAIR_TONE * 1.25); c.toArray(col, k * 3);
+      uv[k * 2] = q / HAIR.COLS * 1.5; uv[k * 2 + 1] = t;
       if (r < HAIR.ROWS && q < HAIR.COLS) { const b = k + HAIR.COLS + 1; idx.push(k, k + 1, b, k + 1, b + 1, b); }
     }
     const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(n * 3), 3)); g.setAttribute('color', new THREE.BufferAttribute(col, 3)); g.setAttribute('uv', new THREE.BufferAttribute(uv, 2)); g.setIndex(idx);
-    const cv = document.createElement('canvas'); cv.width = 128; cv.height = 8; const x2 = cv.getContext('2d'); x2.fillStyle = '#fff'; x2.fillRect(0, 0, 128, 8);
-    for (let k = 0; k < 90; k++) { x2.fillStyle = 'rgba(' + (Math.random() < 0.5 ? '20,0,50' : '255,235,255') + ',' + (0.05 + Math.random() * 0.14) + ')'; x2.fillRect(Math.random() * 128, 0, 1 + Math.random() * 2, 8); }   // strands
-    const strands = new THREE.CanvasTexture(cv); strands.wrapS = THREE.RepeatWrapping; strands.colorSpace = THREE.SRGBColorSpace;
-    C.mesh = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ map: strands, vertexColors: true, roughness: 0.85, metalness: 0, side: THREE.DoubleSide }));
+    // strands: drawn one by one down the length, each its own shade and its own length, with dark partings between the locks that open toward the ends
+    const cv = document.createElement('canvas'); cv.width = 512; cv.height = 256; const x2 = cv.getContext('2d'); x2.clearRect(0, 0, 512, 256);
+    let sd = 11; const rn = () => ((sd = (sd * 16807) % 2147483647) / 2147483647);
+    for (let x = 0; x < 512;) {
+      const w = 1 + Math.floor(rn() * 3), len = (rn() < 0.12 ? 0.62 + rn() * 0.2 : 0.86 + rn() * 0.14) * 256, v = Math.round(255 * (rn() < 0.16 ? 0.38 + rn() * 0.2 : rn() < 0.1 ? 1 : 0.62 + rn() * 0.3));
+      const gr = x2.createLinearGradient(0, 0, 0, len); gr.addColorStop(0, 'rgb(' + v + ',' + v + ',' + v + ')'); gr.addColorStop(0.5 + rn() * 0.3, 'rgb(' + Math.min(255, v + 26) + ',' + Math.min(255, v + 26) + ',' + Math.min(255, v + 26) + ')'); gr.addColorStop(1, 'rgb(' + Math.round(v * 0.8) + ',' + Math.round(v * 0.8) + ',' + Math.round(v * 0.8) + ')');
+      x2.fillStyle = gr; x2.fillRect(x, 0, w, len); x += w;
+    }
+    x2.globalCompositeOperation = 'destination-out';         // partings: slits of nothing between locks, wider toward the tips
+    for (let x = 6 + rn() * 10; x < 512; x += 9 + rn() * 16) { const top = (0.3 + rn() * 0.4) * 256; x2.beginPath(); x2.moveTo(x, top); x2.lineTo(x - 1.2 - rn() * 1.6, 256); x2.lineTo(x + 1.2 + rn() * 1.6, 256); x2.closePath(); x2.fill(); }
+    const strands = new THREE.CanvasTexture(cv); strands.wrapS = THREE.RepeatWrapping; strands.flipY = false; strands.colorSpace = THREE.SRGBColorSpace; strands.anisotropy = 4;
+    C.mesh = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ map: strands, vertexColors: true, roughness: 0.85, metalness: 0, side: THREE.DoubleSide, alphaTest: 0.45 }));
     C.mesh.castShadow = true; C.mesh.frustumCulled = false; parent.add(C.mesh);
   }
   C.mesh.position.copy(cloakP);
