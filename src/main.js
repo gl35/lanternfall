@@ -245,7 +245,7 @@ const WING = { scale: 1.15, root: 0.05 };                     // how big they ar
 // One for each copy of her (the one who wanders, and the one he steers). Built the first time her bones are there to measure her by.
 const cloakP = new THREE.Vector3(), CLOAK = { COLS: 13, ROWS: 14 };
 const kidCloak = { back: -1, mesh: null }, heroCloak = { back: 1, mesh: null };       // which way her back is, along z, in the group each hangs in
-const HAIR = { COLS: 14, ROWS: 14 }, kidHair = { back: -1, mesh: null }, heroHair = { back: 1, mesh: null };
+const hairTip = new THREE.Color().setRGB(0.7, 0.42, 0.97, THREE.SRGBColorSpace), HAIR = { COLS: 18, ROWS: 14 }, kidHair = { back: -1, mesh: null }, heroHair = { back: 1, mesh: null };
 function hairUpdate(C, parent, bones, flow, T) {
   const nb = bones.Neck || bones.Spine2; if (!nb) return;
   parent.worldToLocal(nb.bone.getWorldPosition(cloakP));
@@ -254,26 +254,27 @@ function hairUpdate(C, parent, bones, flow, T) {
     C.N = cloakP.y; const n = (HAIR.COLS + 1) * (HAIR.ROWS + 1), col = new Float32Array(n * 3), uv = new Float32Array(n * 2), idx = [], c = new THREE.Color();
     for (let r = 0; r <= HAIR.ROWS; r++) for (let q = 0; q <= HAIR.COLS; q++) {
       const t = r / HAIR.ROWS, k = r * (HAIR.COLS + 1) + q, lock = 0.86 + 0.28 * (((q * 7919) % 13) / 13);                     // each lock a shade of its own
-      c.setRGB(0.2, 0.05, 0.5).lerp(new THREE.Color(0.5, 0.24, 0.9), Math.pow(t, 0.8)).multiplyScalar(lock); c.toArray(col, k * 3);
+      c.setRGB(0.6, 0.26, 0.92, THREE.SRGBColorSpace).lerp(hairTip, Math.pow(t, 0.9)).multiplyScalar(0.93 + (lock - 1) * 0.5); c.toArray(col, k * 3);
       uv[k * 2] = q / HAIR.COLS * 5; uv[k * 2 + 1] = t;
       if (r < HAIR.ROWS && q < HAIR.COLS) { const b = k + HAIR.COLS + 1; idx.push(k, k + 1, b, k + 1, b + 1, b); }
     }
     const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(n * 3), 3)); g.setAttribute('color', new THREE.BufferAttribute(col, 3)); g.setAttribute('uv', new THREE.BufferAttribute(uv, 2)); g.setIndex(idx);
     const cv = document.createElement('canvas'); cv.width = 128; cv.height = 8; const x2 = cv.getContext('2d'); x2.fillStyle = '#fff'; x2.fillRect(0, 0, 128, 8);
-    for (let k = 0; k < 90; k++) { x2.fillStyle = 'rgba(' + (Math.random() < 0.5 ? '20,0,50' : '255,235,255') + ',' + (0.1 + Math.random() * 0.3) + ')'; x2.fillRect(Math.random() * 128, 0, 1 + Math.random() * 2, 8); }   // strands
+    for (let k = 0; k < 90; k++) { x2.fillStyle = 'rgba(' + (Math.random() < 0.5 ? '20,0,50' : '255,235,255') + ',' + (0.05 + Math.random() * 0.14) + ')'; x2.fillRect(Math.random() * 128, 0, 1 + Math.random() * 2, 8); }   // strands
     const strands = new THREE.CanvasTexture(cv); strands.wrapS = THREE.RepeatWrapping; strands.colorSpace = THREE.SRGBColorSpace;
-    C.mesh = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ map: strands, vertexColors: true, roughness: 0.42, metalness: 0.15, side: THREE.DoubleSide }));
+    C.mesh = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ map: strands, vertexColors: true, roughness: 0.85, metalness: 0, side: THREE.DoubleSide }));
     C.mesh.castShadow = true; C.mesh.frustumCulled = false; parent.add(C.mesh);
   }
   C.mesh.position.copy(cloakP);
-  const N = C.N, L = N * 0.4, rs = N * 0.098, p = C.mesh.geometry.attributes.position, bk = C.back;       // down to her waist
+  const N = C.N, u = N / 1.53, L = 0.44 * u, p = C.mesh.geometry.attributes.position, bk = C.back;       // u: her own size, with the measures below taken from her model
   for (let r = 0; r <= HAIR.ROWS; r++) for (let q = 0; q <= HAIR.COLS; q++) {
-    const t = r / HAIR.ROWS, cc = q / HAIR.COLS * 2 - 1, ang = cc * (1.45 - 0.45 * t * t), rad = rs * (1.02 + 0.1 * Math.sin(t * 3.1)), k = t * L, ends = r === HAIR.ROWS ? (((q * 31) % 7) / 7) * 0.05 * L : 0;
-    const wave = Math.sin(T * 2.6 + t * 3.6 + cc * 1.9) * 0.02 + Math.sin(T * 1.5 + cc * 2.4) * 0.01;
+    const t = r / HAIR.ROWS, cc = q / HAIR.COLS * 2 - 1, k = t * L, e = t * t * (3 - 2 * t);
+    const ang = cc * (1.5 - 0.5 * e), rx = (0.215 - 0.08 * e) * u, rz = (0.145 - 0.045 * e) * u, ends = r === HAIR.ROWS ? (((q * 31) % 7) / 7) * 0.05 * L : 0;
+    const wave = Math.sin(T * 2.6 + t * 3.6 + cc * 1.9) * 0.018 + Math.sin(T * 1.5 + cc * 2.4) * 0.009;
     p.setXYZ(r * (HAIR.COLS + 1) + q,
-      Math.sin(ang) * rad + Math.sin(T * 1.9 + t * 3) * 0.015 * k * (1 + flow),
-      N * 0.03 - k - ends + flow * 0.14 * t * k,
-      bk * (Math.cos(ang) * rad + N * 0.012 + (wave + flow * 0.4 * t) * k));
+      Math.sin(ang) * rx + Math.sin(T * 1.9 + t * 3) * 0.012 * k * (1 + flow),
+      -0.075 * u - k - ends + flow * 0.14 * t * k,
+      bk * (Math.cos(ang) * rz + (wave + flow * 0.4 * t) * k));
   }
   p.needsUpdate = true; C.mesh.geometry.computeVertexNormals();
 }
