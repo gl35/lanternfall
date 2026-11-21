@@ -80,7 +80,11 @@ export function valley2At(t, side = 0) {
   return { x: V.ux * t - V.uz * off, z: V.uz * t + V.ux * off };
 }
 // The dell at the end of it: a wide grassy hollow ringed by the hills. (It was a cove once: `level` far below the ground means there is no water in it.)
-export const BAY = { ...valley2At(138), r: 40, edge: 62, level: -99, deep: -1.7, rise: 2.0, shore: 32.3 };
+export const RIVER = { ax: -VALLEY2.uz, az: VALLEY2.ux, lx: VALLEY2.ux, lz: VALLEY2.uz, w0: 2.4, w1: 5.6, bed: -2.3, level: -1.15, amp: 5, k: 0.09, len: 62 };   // it crosses the dell, square to the way in
+export const BAY = { ...valley2At(138), r: 40, edge: 62, level: RIVER.level, deep: -0.7, rise: 0.5, shore: 32.3 };
+// Where a point lies from the river: how far along it, and how far out from the middle of the stream.
+export function riverLat(x, z) { const dx = x - BAY.x, dz = z - BAY.z, u = dx * RIVER.ax + dz * RIVER.az; return dx * RIVER.lx + dz * RIVER.lz - RIVER.amp * Math.sin(u * RIVER.k); }
+export function riverAt(u, lat = 0) { const l = lat + RIVER.amp * Math.sin(u * RIVER.k); return { x: BAY.x + RIVER.ax * u + RIVER.lx * l, z: BAY.z + RIVER.az * u + RIVER.lz * l }; }
 const bayMask = (x, z) => 1 - sstep(BAY.r, BAY.edge, Math.hypot(x - BAY.x, z - BAY.z));
 const bayFloor = r => BAY.deep + BAY.rise * sstep(6, BAY.r, r);
 export const CASTLE = { x: 0, z: -112, y: 9, flat: 46, edge: 70 };   // a levelled hilltop beyond the far side of the meadow
@@ -92,7 +96,10 @@ export function hillHeight(x, z) {
   const peaks = 0.5 + 0.5 * Math.sin(x * 0.0085 + 0.5) * Math.cos(z * 0.0075 - 1.0), ridge = 0.5 + 0.5 * Math.sin(Math.atan2(z, x) * 7 + 1.0);
   const cm = castleMask(x, z), bm = bayMask(x, z);
   let h = sstep(HILL_IN, HILL_OUT, d) * (5 + 16 * roll + 9 * wave) * (1 - Math.max(valley(x, z), valley2(x, z))) * (1 - cm) + CASTLE.y * cm;
-  if (bm > 0) h = h * (1 - bm) + bayFloor(Math.hypot(x - BAY.x, z - BAY.z)) * bm;
+  if (bm > 0) {
+    h = h * (1 - bm) + bayFloor(Math.hypot(x - BAY.x, z - BAY.z)) * bm;
+    const ch = (1 - sstep(RIVER.w0, RIVER.w1, Math.abs(riverLat(x, z)))) * sstep(0.1, 0.7, bm); h = h * (1 - ch) + RIVER.bed * ch;   // the river's channel
+  }
   return h + sstep(190, 430, d) * (26 + 60 * peaks + 26 * ridge);
 }
 const HILL_GLSL = `float hillH(vec2 p) {
@@ -107,7 +114,11 @@ const HILL_GLSL = `float hillH(vec2 p) {
     float vale2 = step(0.0, wt) * (1.0 - smoothstep(${VALLEY2.flat.toFixed(1)}, ${VALLEY2.wall.toFixed(1)}, abs(ws))) * (1.0 - smoothstep(${VALLEY2.end0.toFixed(1)}, ${VALLEY2.end1.toFixed(1)}, wt));
     float bd = distance(p, vec2(${BAY.x.toFixed(2)}, ${BAY.z.toFixed(2)})), bm = 1.0 - smoothstep(${BAY.r.toFixed(1)}, ${BAY.edge.toFixed(1)}, bd);
     float h = smoothstep(${HILL_IN.toFixed(1)}, ${HILL_OUT.toFixed(1)}, d) * (5.0 + 16.0 * roll + 9.0 * wave) * (1.0 - max(vale, vale2)) * (1.0 - cm) + ${CASTLE.y.toFixed(1)} * cm;
-    return mix(h, ${BAY.deep.toFixed(1)} + ${BAY.rise.toFixed(1)} * smoothstep(6.0, ${BAY.r.toFixed(1)}, bd), bm);
+    h = mix(h, ${BAY.deep.toFixed(1)} + ${BAY.rise.toFixed(1)} * smoothstep(6.0, ${BAY.r.toFixed(1)}, bd), bm);
+    vec2 rp = p - vec2(${BAY.x.toFixed(2)}, ${BAY.z.toFixed(2)});
+    float ru = dot(rp, vec2(${RIVER.ax.toFixed(3)}, ${RIVER.az.toFixed(3)})), rl = dot(rp, vec2(${RIVER.lx.toFixed(3)}, ${RIVER.lz.toFixed(3)})) - ${RIVER.amp.toFixed(1)} * sin(ru * ${RIVER.k.toFixed(3)});
+    float ch = (1.0 - smoothstep(${RIVER.w0.toFixed(1)}, ${RIVER.w1.toFixed(1)}, abs(rl))) * smoothstep(0.1, 0.7, bm);
+    return mix(h, ${RIVER.bed.toFixed(1)}, ch);
   }`;
 
 const LAND = { meadow: new THREE.Color(0x48a838), sunny: new THREE.Color(0x86cf48), wood: new THREE.Color(0x2c8040), high: new THREE.Color(0x4f9a78), sand: new THREE.Color(0xf0dca6), wet: new THREE.Color(0xc9ad76), bed: new THREE.Color(0x3f8f8a) };
@@ -117,22 +128,56 @@ function landColor(c, x, z, y, d) {
 }
 // The cove needs finer ground than the hills have: a close-meshed round of land, sand and sea bed laid just over them.
 function cove() {
-  const RINGS = 52, SEGS = 112, pos = [], col = [], idx = [], c = new THREE.Color();
+  const RINGS = 66, SEGS = 176, pos = [], col = [], idx = [], c = new THREE.Color();
   for (let i = 0; i <= RINGS; i++) {
     const r = BAY.edge * i / RINGS;
     for (let j = 0; j <= SEGS; j++) {
       const a = j / SEGS * Math.PI * 2, x = BAY.x + Math.cos(a) * r, z = BAY.z + Math.sin(a) * r, y = hillHeight(x, z);
       pos.push(x, y + 0.03, z);
       landColor(c, x, z, y, Math.hypot(x, z));
-      const ripple = Math.sin(r * 2.1 + Math.sin(a * 9) * 0.8) * 0.5 + 0.5;                       // faint ridges left in the sand by the water
-      const grassy = sstep(BAY.r - 1.2, BAY.r + 2.2, r + Math.sin(a * 13) * 0.9);
-      const sandC = LAND.sand.clone().lerp(LAND.wet, sstep(BAY.level + 0.5, BAY.level - 0.1, y) * 0.9 + ripple * 0.08).lerp(LAND.bed, sstep(BAY.level - 0.3, BAY.deep, y) * 0.85);
-      c.lerp(sandC, 1 - grassy); col.push(c.r, c.g, c.b);
+      c.lerp(LAND.wet, sstep(RIVER.level + 0.4, RIVER.level - 0.05, y) * 0.85).lerp(LAND.bed, sstep(RIVER.level - 0.3, RIVER.bed, y) * 0.75);   // damp gravel at the water, darker down on the bed
+      col.push(c.r, c.g, c.b);
     }
   }
   for (let i = 0; i < RINGS; i++) for (let j = 0; j < SEGS; j++) { const a = i * (SEGS + 1) + j, b = a + SEGS + 1; idx.push(a, a + 1, b, a + 1, b + 1, b); }
   const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3)); geo.setIndex(idx); geo.computeVertexNormals();
   const mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ vertexColors: true })); mesh.receiveShadow = true; return mesh;
+}
+function riverWater(U) {
+  const N = 140, half = 6.4, pos = [], uv = [], idx = [];
+  for (let i = 0; i <= N; i++) {
+    const u = -RIVER.len + 2 * RIVER.len * i / N;
+    for (const sd of [-1, 1]) { const p = riverAt(u, sd * half); pos.push(p.x, RIVER.level, p.z); uv.push(u, sd * half); }
+    if (i < N) { const q = i * 2; idx.push(q, q + 2, q + 1, q + 1, q + 2, q + 3); }
+  }
+  const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); geo.setIndex(idx);
+  const mat = new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, side: THREE.DoubleSide, uniforms: { uTime: U.time, uWind: U.wind, uSun: { value: SUN_DIR }, uLen: { value: RIVER.len } },
+    vertexShader: 'varying vec2 vP; varying vec3 vW; void main() { vP = uv; vec4 w = modelMatrix * vec4(position, 1.0); vW = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }',
+    fragmentShader: `uniform float uTime, uWind, uLen; uniform vec3 uSun; varying vec2 vP; varying vec3 vW;
+      float hgt(vec2 p) {
+        float amp = 0.5 + 0.5 * uWind, f = p.x + uTime * 1.7;                                          // everything drifts downstream
+        return (sin(f * 1.5 + sin(p.y * 1.3) * 1.3) * 0.42 + sin(f * 3.4 + p.y * 2.3) * 0.2 + sin((f * 0.6 - p.y * 1.7) * 2.6 + uTime * 0.8) * 0.2 + sin(f * 7.1 - p.y * 5.3) * 0.07) * amp;
+      }
+      void main() {
+        float d = abs(vP.y), depth = clamp(1.0 - d / 4.6, 0.0, 1.0);
+        float e = 0.08, h = hgt(vP), hx = hgt(vP + vec2(e, 0.0)) - h, hy = hgt(vP + vec2(0.0, e)) - h;
+        vec3 n = normalize(vec3(-hx / e * 0.15, 1.0, -hy / e * 0.15)), V = normalize(cameraPosition - vW), L = normalize(uSun);
+        float fres = pow(1.0 - max(dot(n, V), 0.0), 3.0);
+        vec3 col = mix(vec3(0.50, 0.80, 0.66), vec3(0.07, 0.36, 0.44), pow(depth, 0.8));
+        col += h * 0.04;
+        col = mix(col, vec3(0.78, 0.90, 1.0), fres * 0.65);
+        float spec = pow(max(dot(reflect(-L, n), V), 0.0), 70.0);
+        float glit = pow(max(dot(reflect(-L, normalize(n + vec3(sin(vP.x * 23.0 + uTime * 4.4), 0.0, sin(vP.y * 19.0 - uTime * 2.1)) * 0.14)), V), 0.0), 200.0);
+        col += vec3(1.0, 0.96, 0.86) * (spec * 0.8 + glit * 1.4);
+        float f = vP.x + uTime * 1.7;
+        float streak = smoothstep(0.82, 1.0, sin(f * 0.8 + sin(vP.y * 2.2) * 1.6) * sin(vP.y * 2.9 + f * 0.25)) * 0.3;   // threads of foam carried along
+        col = mix(col, vec3(1.0), streak);
+        float alpha = mix(0.4, 0.9, smoothstep(0.0, 0.45, depth)) * smoothstep(uLen, uLen - 5.0, abs(vP.x));
+        gl_FragColor = vec4(col, alpha);
+      }`,
+  });
+  const m = new THREE.Mesh(geo, mat); m.renderOrder = 1; m.frustumCulled = false; return m;
 }
 // Sea water in the cove: swell running in to the beach, lines of foam breaking along the shore, sun on the ripples, clear in the shallows.
 function seaWater(U) {
@@ -176,7 +221,7 @@ function hills() {
     const d = R * 0.985 + (OUT - R * 0.985) * Math.pow(i / RINGS, 1.7);
     for (let j = 0; j <= SEGS; j++) {
       const a = j / SEGS * Math.PI * 2, x = Math.cos(a) * d, z = Math.sin(a) * d, y = hillHeight(x, z);
-      pos.push(x, y + 0.006, z);
+      pos.push(x, y + 0.006 - 2.6 * bayMask(x, z) * sstep(BAY.edge, BAY.edge - 6, Math.hypot(x - BAY.x, z - BAY.z)), z);   // sunk out of sight where the dell's own finer ground lies over it
       landColor(c, x, z, y, d);
       col.push(c.r, c.g, c.b);
     }
@@ -523,6 +568,7 @@ function grassField(r, U, o) {
         float ramp = smoothstep(${f(o.range[0])}, ${f(o.range[1])}, dC);
         float keep = ${o.mode === 'near' ? 'clamp((1.0 - ramp - hsh) * 5.0, 0.0, 1.0)' : `clamp((ramp - hsh) * 5.0, 0.0, 1.0) * (1.0 - smoothstep(${f(o.fadeOut[0])}, ${f(o.fadeOut[1])}, dC))`} * step(length(wp), ${f(ROAM + 30)});
         ground = hillH(wp);
+        keep *= max(step(${f(BAY.edge)}, distance(wp, vec2(${f(BAY.x)}, ${f(BAY.z)}))), smoothstep(${f(RIVER.level + 0.1)}, ${f(RIVER.level + 0.5)}, ground));   // none in the river
         keep *= 1.0 - step(abs(wp.x - ${f(CASTLE.x)}), 26.3) * step(abs(wp.y - ${f(CASTLE.z)}), 26.3);
         keep *= smoothstep(${f(PLAYGROUND.r - 1.2)}, ${f(PLAYGROUND.r + 0.8)}, distance(wp, vec2(${f(PLAYGROUND.x)}, ${f(PLAYGROUND.z)})));
         keep *= mix(1.0, step(fract(hsh * 7.31), 0.05), uSnow);                       // winter: only a few dry stalks show through the snow
@@ -711,8 +757,8 @@ function tinted(geo, fn) {                                   // give a plain sha
   const p = geo.attributes.position, col = []; for (let k = 0; k < p.count; k++) col.push(...fn(p.getX(k), p.getY(k), p.getZ(k)));
   geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3)); return geo;
 }
-function flowers(r, U) {
-  const g = new THREE.Group(), N = 2600, mat = () => swayWithGrass(new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true, side: THREE.DoubleSide }), U);
+function flowers(r, U, zone) {
+  const g = new THREE.Group(), N = zone ? zone.n : 2600, mat = () => swayWithGrass(new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true, side: THREE.DoubleSide }), U);
   const daisy = flowerHead([{ n: 15, len: 0.105, wid: 0.036, r0: 0.02, lift: 0.012, droop: 0.032, rot: 0, shade0: 0.8, shade1: 1, cup: 0.25 },
     { n: 10, len: 0.078, wid: 0.03, r0: 0.016, lift: 0.03, droop: 0.01, rot: 0.3, shade0: 0.86, shade1: 1, cup: 0.3 }]);
   const cup = flowerHead([{ n: 5, len: 0.1, wid: 0.118, r0: 0.008, lift: 0.07, droop: -0.012, rot: 0, shade0: 0.48, shade1: 1, cup: 0.5 },
@@ -730,19 +776,35 @@ function flowers(r, U) {
   let cx = 0, cz = 0, hue = 0, kind = kinds[0];
   for (let i = 0; i < N; i++) {
     if (i % 26 === 0) {                                      // they grow in drifts of one kind and mostly one colour
-      const a = r() * 6.283, rad = Math.sqrt(r()) * (R - 3); cx = Math.cos(a) * rad; cz = Math.sin(a) * rad;
+      if (zone) [cx, cz] = zone.centre(r); else { const a = r() * 6.283, rad = Math.sqrt(r()) * (R - 3); cx = Math.cos(a) * rad; cz = Math.sin(a) * rad; }
       kind = kinds[0].k >= kinds[0].n ? kinds[1] : kinds[1].k >= kinds[1].n ? kinds[0] : r() < 0.56 ? kinds[0] : kinds[1]; hue = Math.floor(r() * kind.hues.length);
     }
     if (kind.k >= kind.n) kind = kinds[0].k < kinds[0].n ? kinds[0] : kinds[1];
     const a = r() * 6.283, rad = Math.sqrt(r()) * 3.6, sc = kind.size[0] + r() * kind.size[1];
-    d.position.set(cx + Math.cos(a) * rad, 0.78 + r() * 0.32, cz + Math.sin(a) * rad);
+    { const fx = cx + Math.cos(a) * rad, fz = cz + Math.sin(a) * rad; d.position.set(fx, 0.78 + r() * 0.32 + (zone ? hillHeight(fx, fz) - zone.y : 0), fz); }
     d.rotation.set((r() - 0.5) * 0.6, r() * 6, (r() - 0.5) * 0.6); d.scale.setScalar(sc); d.updateMatrix();
     kind.petals.setMatrixAt(kind.k, d.matrix); kind.mid.setMatrixAt(kind.k, d.matrix); stems.setMatrixAt(i, d.matrix);
     c.set(r() < 0.78 ? kind.hues[hue % kind.hues.length] : kind.hues[Math.floor(r() * kind.hues.length)]); c.offsetHSL((r() - 0.5) * 0.03, 0, (r() - 0.5) * 0.06); kind.petals.setColorAt(kind.k, c);
     kind.k++;
   }
   for (const m of [kinds[0].petals, kinds[0].mid, kinds[1].petals, kinds[1].mid, stems]) { m.frustumCulled = false; g.add(m); }
+  if (zone) g.position.y = zone.y;
   return g;
+}
+// Bulrushes in clumps along both banks of the river: a stalk, a brown head, two long leaves, swaying with the grass.
+function reeds(U) {
+  const r = rng(909), N = 300, H = 1.7, green = (x, y) => { const k = 0.7 + 0.3 * (1 + y / H); return [0.3 * k, 0.58 * k, 0.22 * k]; };
+  const leaf = k => tinted(new THREE.ConeGeometry(0.04, 1.3, 4).scale(1, 1, 0.25).rotateZ(-k * 0.17).translate(k * 0.11, -H + 0.65, 0), green);
+  const geo = mergeGeometries([tinted(new THREE.CylinderGeometry(0.008, 0.016, H, 5).translate(0, -H / 2, 0), green), tinted(new THREE.CapsuleGeometry(0.032, 0.2, 3, 8).translate(0, -0.2, 0), () => [0.36, 0.2, 0.1]), leaf(1), leaf(-1)]);
+  const m = new THREE.InstancedMesh(geo, swayWithGrass(new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true, side: THREE.DoubleSide }), { time: U.time, wind: { value: 0.1 } }), N), d = new THREE.Object3D();   // tall as they are, they only nod
+  let cu = 0, cl = 0;
+  for (let i = 0; i < N; i++) {
+    if (i % 9 === 0) { cu = (r() - 0.5) * 96; cl = (r() < 0.5 ? -1 : 1) * (3.5 + r() * 1.0); }
+    const p = riverAt(cu + (r() - 0.5) * 1.6, cl + (r() - 0.5) * 0.9), sc = 0.7 + r() * 0.6;
+    d.position.set(p.x, Math.max(hillHeight(p.x, p.z), RIVER.level - 0.45) - RIVER.level + H * sc, p.z);
+    d.rotation.set((r() - 0.5) * 0.25, r() * 6.283, (r() - 0.5) * 0.25); d.scale.set(1, sc, 1); d.updateMatrix(); m.setMatrixAt(i, d.matrix);
+  }
+  m.position.y = RIVER.level; m.frustumCulled = false; m.castShadow = true; return m;
 }
 
 function blobGeo(r, sx, sy, sz, amp, lo, hi) {
@@ -866,6 +928,7 @@ export function buildScenery(scene) {
   const ground = meadow(r); scene.add(ground.mesh);
   const grassNear = grassField(r, U, GRASS_NEAR), grassFar = grassField(r, U, GRASS_FAR); scene.add(grassNear, grassFar);
   const blooms = flowers(r, U); scene.add(blooms);
+  scene.add(flowers(rng(4411), U, { n: 1300, y: BAY.deep, centre: q => { for (;;) { const a = q() * 6.283, rad = 6 + Math.sqrt(q()) * 38, x = BAY.x + Math.cos(a) * rad, z = BAY.z + Math.sin(a) * rad; if (Math.abs(riverLat(x, z)) > 9.5) return [x, z]; } } }), reeds(U));   // the dell has its own drifts, clear of the water
 
   const bareGeos = [branchGeo(r), branchGeo(r), branchGeo(r)], trees = [];
   TREES.forEach((t, i) => {
@@ -876,6 +939,7 @@ export function buildScenery(scene) {
   const LEAVES_PER = foliage.userData.full / trees.length;   // leaves are laid down tree by tree, so the last trees can simply go without
   foliage.userData.full = Math.round(LEAVES_PER * (trees.length - 4)); foliage.count = foliage.userData.full;
   const land = hills(); scene.add(land);
+  scene.add(cove(), riverWater(U));
   const woods = hillWoods(r, U, bareGeos[0]); scene.add(woods);
   let detailQ = 1, lodT = -1;
   for (let i = 0; i < 46; i++) {                             // rounded boulders, a few big ones
