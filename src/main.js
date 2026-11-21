@@ -6,6 +6,7 @@ import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.j
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { buildScenery, softTexture, R, START, TREES, WOODS, ROAM, hillHeight, VALLEY, valleyAt, PLAYGROUND, CASTLE, BAY, valley2At, RIVER, riverAt, riverUV } from './scenery.js';
 import { buildCastle } from './castle.js';
+import { buildDragon } from './dragon.js';
 import { sfx } from './audio.js';
 
 // ---------- renderer / scene ----------
@@ -218,7 +219,8 @@ const wings = new THREE.Group(), wingP = new THREE.Vector3();
 const WING = { scale: 1.15, root: 0.05 };                     // how big they are, and how far up the model they join her back
 {
   for (const side of [1, -1]) wings.add(new THREE.Group());
-  new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).load(import.meta.env.BASE_URL + 'models/wings.glb', g => {
+  const KID_WINGS = false;                                   // she flies on her dragon now; set true to give her wings of her own again
+  if (KID_WINGS) new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).load(import.meta.env.BASE_URL + 'models/wings.glb', g => {
     let src = null; g.scene.traverse(o => { if (o.isMesh && !src) src = o; });
     g.scene.updateMatrixWorld(true);
     const geo = src.geometry, pos = geo.attributes.position, ix = geo.index.array, half = [[], []], M = src.matrixWorld.clone(), v = new THREE.Vector3();
@@ -288,6 +290,9 @@ function rideLimbs() {
       }
       leg(side, sx, [0.14, -0.14 + 0.1 * c, 1], [0.05, -0.55 - 0.2 * c, 0.85]);
     }
+  } else if (k === 'dragon') {                                 // astride its shoulders, holding on, leaning with it
+    const lean = Math.min(1, Math.hypot(e.vx, e.vz) / 10); kid.group.rotation.x = 0.22 * lean; kid.group.updateMatrixWorld(true); kid.group.getWorldQuaternion(sitQ);
+    for (const [side, sx, ph] of LR) { leg(side, sx, [0.8, -0.35, 0.9], [0.2, -1, -0.1 + 0.08 * Math.sin(t * 2 + ph)]); arm(side, sx, [0.3, -0.6, 0.75], [-0.12, -0.35 + 0.05 * Math.sin(t * 6 + ph) * lean, 1]); }
   } else if (k === 'sand') {                                   // patting the sand into shape, one hand then the other
     for (const [side, sx, ph] of LR) { const pat = 0.5 + 0.5 * Math.sin(t * 6.5 + ph); arm(side, sx, [0.3, -0.72 + 0.22 * pat, 0.6], [0.0, -0.62 + 0.7 * pat, 0.75]); leg(side, sx, [0.22, -0.3, 1], [0.1, -0.5 + 0.07 * Math.sin(t * 3 + ph), 1]); }
   }
@@ -1052,7 +1057,44 @@ const play = { swing: null, hammock: null, spots: [] };
   }
   play.field = at(0, 0);
 }
-const RIDES = ['swing', 'hammock', 'round', 'seesaw', 'slide', 'bars', 'sand', 'boat'];
+const RIDES = ['swing', 'hammock', 'round', 'seesaw', 'slide', 'bars', 'sand', 'boat', 'dragon'];
+// Her dragon waits in the meadow. Walking into it climbs on; the stick walks it, the jump button beats its wings to take off and to climb,
+// and left alone in the air it glides down. Landed and standing still after a flight, she hops off.
+const dragon = buildDragon(renderer); scene.add(dragon.root);
+{
+  let best = null, bd = -1;                                  // the most open spot not far from where the game starts
+  for (let k = 0; k < 60; k++) {
+    const a = k * 2.399, rad = 7 + (k % 10) * 1.4, x = START.x + Math.cos(a) * rad, z = START.z - 8 + Math.sin(a) * rad;
+    if (Math.hypot(x, z) > R - 6) continue;
+    let d = 1e9; for (const t of TREES) d = Math.min(d, Math.hypot(t.x - x, t.z - z)); for (const q of play.spots) d = Math.min(d, Math.hypot(q.x - x, q.z - z) - q.r);
+    d = Math.min(d, Math.hypot(x - START.x, z - START.z)); if (d > bd) { bd = d; best = { x, z }; }
+  }
+  dragon.root.position.set(best.x, hillHeight(best.x, best.z), best.z); dragon.root.rotation.y = Math.atan2(START.x - best.x, START.z - best.z);
+  play.dragon = { x: best.x, z: best.z, g: dragon.root, r: 1.9, seat: dragon.root, rider: false, pose: KID_POSE.hold, Y: dragon.root.position.y, alt: 0, vy: 0, vx: 0, vz: 0, turn: 0, still: 0, flew: false,
+    put(k) { k.position.set(0, dragon.seat.y - 0.93, dragon.seat.z); k.rotation.set(0, 0, 0); this.still = 0; this.flew = false; this.vx = this.vz = this.vy = 0; camYaw = Math.PI - dragon.root.rotation.y; },
+    get exit() { const h = dragon.root.rotation.y; return { x: this.x + Math.cos(h) * 2.7, z: this.z - Math.sin(h) * 2.7 }; } };
+}
+function flyDragon(dt, jx, jy, l) {
+  const e = play.dragon, b = e.g, air = e.alt > 0.05;
+  let turn = 0;
+  if (l > 0.12) {
+    camYaw += jx * 1.15 * dt; turn = jx;
+    const sn = Math.sin(camYaw), c = Math.cos(camYaw), mx = c * jx + sn * -jy, mz = sn * jx - c * -jy, sp = air ? 10.5 : 3.4, k = Math.min(1, dt * (air ? 2 : 5));
+    e.vx += (mx * sp - e.vx) * k; e.vz += (mz * sp - e.vz) * k;
+    let dh = Math.atan2(mx, mz) - b.rotation.y; dh = Math.atan2(Math.sin(dh), Math.cos(dh)); b.rotation.y += dh * Math.min(1, dt * 4);
+  } else { const k = Math.min(1, dt * (air ? 0.7 : 6)); e.vx -= e.vx * k; e.vz -= e.vz * k; }
+  e.turn += (turn - e.turn) * Math.min(1, dt * 4);
+  let x = b.position.x + e.vx * dt, z = b.position.z + e.vz * dt;
+  const d = Math.hypot(x, z); if (d > ROAM) { x *= ROAM / d; z *= ROAM / d; }
+  if (!air) for (const t of TREES) { const dx = x - t.x, dz = z - t.z, dd = Math.hypot(dx, dz), rad = 0.7 * t.s + 1.3; if (dd < rad && dd > 1e-4) { x = t.x + dx / dd * rad; z = t.z + dz / dd * rad; } }
+  const g = castle.groundAt(x, z, e.Y + 0.4);
+  if (e.Y > g + 0.02 || e.vy > 0) { e.vy = Math.max(-3.2, e.vy - 6.5 * dt); e.Y += e.vy * dt; if (e.Y > g + 46) { e.Y = g + 46; e.vy = Math.min(e.vy, 0); } }
+  if (e.Y <= g) { if (e.alt > 0.3) { dust(x, g + 0.2, z, 6); sfx.thump(0.3); } e.Y = g; e.vy = 0; }
+  e.alt = e.Y - g; if (e.alt > 1) e.flew = true;
+  b.position.set(x, e.Y, z); e.x = player.x = x; e.z = player.z = z; player.g = e.Y; player.y = 0; player.vy = 0; player.moving = 0;
+  e.still = e.alt < 0.05 && l < 0.12 && e.flew ? e.still + dt : 0;
+  if (e.still > 1.2) playerDismount();
+}
 // Rowing: the stick forward pulls her along bow first, sideways brings the bow round, back paddles her astern. The jump button steps out.
 const ROW_UP = new THREE.Vector3(0, 1, 0), rowDir = new THREE.Vector3();
 function rowBoat(dt, jx, jy, l) {
@@ -1083,6 +1125,11 @@ function updatePlay(dt) {
     if (play.boat) for (const o of play.boat.oars) {         // each oar turns on its rowlock: blade down for the pull, lifted clear to come back
       const ph = play.boat.phase; rowDir.set(o.side, -0.18 - 0.09 * Math.sin(ph), 0.5 * Math.cos(ph)).normalize();
       o.g.position.copy(o.at).addScaledVector(rowDir, -o.inboard); o.g.quaternion.setFromUnitVectors(ROW_UP, rowDir);
+    }
+    {                                                        // the dragon: riderless it settles to the ground and waits
+      const e = play.dragon;
+      if (!e.rider) { const g = hillHeight(e.x, e.z); e.Y = Math.max(g, e.Y - 5 * dt); e.alt = e.Y - g; e.vx = e.vz = e.vy = 0; e.turn *= 0.9; e.g.position.y = e.Y; }
+      dragon.update(dt, { air: e.alt > 0.05, speed: Math.hypot(e.vx, e.vz), vy: e.vy, turn: e.turn, ridden: e.rider });
     }
     const mb = play.bars, sd = play.sand;
     if (mb.rider) {                                          // along the rungs and back to the middle of the far end, body swinging under her hands
@@ -1417,6 +1464,7 @@ function updateHills(dt) {
 }
 
 function jump() {
+  if (player.ride === 'dragon') { if (state !== 'play') return false; play.dragon.vy = 7.6; sfx.whoosh(0.2); return true; }   // a beat of the wings
   if (player.ride) { playerDismount(); return true; }
   if (player.perch) { leavePerch(true); return true; }
   if (HERO.fly && player.y > 0.01) {
@@ -1452,6 +1500,7 @@ function movePlayer(dt) {
   let l = Math.hypot(jx, jy); if (l > 1) { jx /= l; jy /= l; l = 1; }
   if (state !== 'play') l = jx = jy = 0;
   if (player.ride === 'boat') { rowBoat(dt, jx, jy, l); return; }
+  if (player.ride === 'dragon') { flyDragon(dt, jx, jy, l); return; }
   if (player.ride) {
     if (l < 0.12) player.rideFree = true;
     else if (player.rideFree) playerDismount();
@@ -1482,6 +1531,7 @@ function movePlayer(dt) {
     else if (l > 0.12 && dd < rad + 0.3 && state === 'play' && !aim.on) { playerMount(kind); return; }
   }
   for (const q of play.spots) push(q.x, q.z, q.r);
+  if (heroIx !== KID) push(play.dragon.x, play.dragon.z, 2.0);   // nobody else gets on it
   if (d > R) for (const t of WOODS) push(t.x, t.z, t.r);
   {
     const feet = player.g + player.y;
@@ -1505,8 +1555,8 @@ const camPos = new THREE.Vector3(), camAt = new THREE.Vector3();
 function updateCamera(dtReal) {
   if (window.__freecam) return;
   fwd(camYaw, tmpF);
-  const aiming = aim.on && aim.valid, D0 = (portrait ? 8.6 : 7.4) + (aiming ? 1.2 : 0) + HERO.cam * 3;
-  let D = D0, H = (portrait ? 4.6 : 3.8) + HERO.cam * 1.4;
+  const aiming = aim.on && aim.valid, onDragon = player.ride === 'dragon', D0 = (portrait ? 8.6 : 7.4) + (aiming ? 1.2 : 0) + HERO.cam * 3 + (onDragon ? 5 : 0);
+  let D = D0, H = (portrait ? 4.6 : 3.8) + HERO.cam * 1.4 + (onDragon ? 1.6 : 0);
   // keep the camera out of the trees: slide it in toward the player, or duck under the canopy
   const near = Math.hypot(player.x, player.z) > R ? WOODS.filter(t => Math.abs(t.x - player.x) < 22 && Math.abs(t.z - player.z) < 22) : [];   // hill trees close by
   const blocked = (d, k) => { const x = player.x - tmpF.x * d, z = player.z - tmpF.z * d; return TREES.some(t => Math.hypot(x - t.x, z - t.z) < k * t.s) || near.some(t => Math.hypot(x - t.x, z - t.z) < k * 0.75 * t.r); };
@@ -1516,7 +1566,7 @@ function updateCamera(dtReal) {
   camPos.set(player.x - tmpF.x * D, H + player.g + lift, player.z - tmpF.z * D);
   camPos.y = Math.max(camPos.y, hillHeight(camPos.x, camPos.z) + 1.6);                        // never under a slope behind him
   const ax = player.x + tmpF.x * 7, az = player.z + tmpF.z * 7;                                 // look along the slope he is on
-  camAt.set(ax, 1.7 + HERO.cam + lift * (player.flying ? 0.8 : 1) + player.g + (hillHeight(ax, az) - player.g) * 0.5, az);
+  camAt.set(ax, 1.7 + HERO.cam + lift * (player.flying ? 0.8 : 1) + player.g + (hillHeight(ax, az) - player.g) * (onDragon ? 0.05 : 0.5), az);
   const k = camReady ? Math.min(1, dtReal * 7) : 1; camReady = true;
   camera.position.lerp(camPos, k);
   shake = Math.max(0, shake - dtReal * 1.6);
