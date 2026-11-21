@@ -1243,7 +1243,7 @@ const play = { swing: null, hammock: null, spots: [] };
       const SEA = BAY.level > -50;                              // the boat, windbreak and sandcastle belong to a shore: with no sea they stay away
       if (SEA) { const bp = riverAt(-9, 0.4); boat.position.set(bp.x, BAY.level + 0.12, bp.z); boat.rotation.y = Math.atan2(RIVER.ax, RIVER.az) + 0.3; scene.add(boat); play.deco.push({ kind: 'boat', o: boat, ph: 1.3, x: bp.x, z: bp.z });
         play.boat = { x: bp.x, z: bp.z, g: boat, r: 1.5, seat: boat, rider: false, pose: KID_POSE.hold, v: 0, phase: -1.9, oars: boat.userData.oars,
-          put(k) { k.position.set(0, 0.07 - 0.86, -0.3); k.rotation.set(0, Math.PI, 0); this.v = 0; camYaw = Math.PI - boat.rotation.y; k.traverse(o => { o.renderOrder = -2; }); },   // on the middle thwart, facing aft as a rower does
+          put(k) { k.position.set(0, 0.07 - 0.86, -1.4); k.rotation.set(0, 0, 0); this.v = 0; camYaw = Math.PI - boat.rotation.y; k.traverse(o => { o.renderOrder = -2; }); },   // on the stern seat, facing the way the boat goes, the oar handles in front of her
           get exit() { const q = riverUV(boat.position.x, boat.position.z); return riverAt(q.u, (q.lat < 0 ? -1 : 1) * 6.2); } };          // she steps out onto the nearer bank
       }
       for (const [da, r, len, turn] of [[15, 8.5, 3.2, 0.4], [-22, -9, 2.2, 1.9], [31, -8.5, 2.6, 2.6]]) {
