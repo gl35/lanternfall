@@ -287,10 +287,10 @@ function dressKid(root) {
   const sk = mesh.skeleton, at = n => { const i = sk.bones.findIndex(b => b.name.replace(/^mixamorig:?/, '') === n); return i < 0 ? null : new THREE.Vector3().setFromMatrixPosition(new THREE.Matrix4().copy(sk.boneInverses[i]).invert()); };
   const head = at('Head'), hips = at('Hips'), lf = at('LeftFoot'), rf = at('RightFoot'), la = at('LeftArm'), ra = at('RightArm'); if (!head || !hips || !lf || !rf || !la || !ra) return;
   const foot = lf.clone().add(rf).multiplyScalar(0.5), up = head.clone().sub(foot), span = up.length(), side = la.clone().sub(ra).normalize(); up.normalize();
-  const map = mesh.material.map, img = map.image, W = img.width, H = img.height, pos = mesh.geometry.attributes.position, uv = mesh.geometry.attributes.uv, ix = mesh.geometry.index;
+  const map = mesh.material.map, img = map.image, UPS = img.width <= 1024 ? 2 : 1, W = img.width * UPS, H = img.height * UPS, pos = mesh.geometry.attributes.position, uv = mesh.geometry.attributes.uv, ix = mesh.geometry.index;
   const cv = document.createElement('canvas'), mk = document.createElement('canvas'); cv.width = mk.width = W; cv.height = mk.height = H;
   const g = cv.getContext('2d', { willReadFrequently: true }), m = mk.getContext('2d', { willReadFrequently: true }); g.drawImage(img, 0, 0, W, H);
-  m.fillStyle = '#000'; m.fillRect(0, 0, W, H); m.globalCompositeOperation = 'lighter'; m.lineWidth = 2; m.lineJoin = 'round';
+  m.fillStyle = '#000'; m.fillRect(0, 0, W, H); m.globalCompositeOperation = 'lighter'; m.lineWidth = 3 * UPS; m.lineJoin = 'round';
   const v = new THREE.Vector3(), hgt = [], out = [], n = ix ? ix.count : pos.count;
   for (let i = 0; i < pos.count; i++) { v.fromBufferAttribute(pos, i); hgt.push(v.clone().sub(foot).dot(up) / span); out.push(Math.abs(v.sub(hips).dot(side)) / span); }
   for (let k = 0; k < n; k += 3) {
@@ -304,9 +304,15 @@ function dressKid(root) {
     const skirt = mp[i] > 128, bodice = mp[i + 1] > 128; if (!skirt && !bodice) continue;
     const r = d[i], gg = d[i + 1], b = d[i + 2], mx = Math.max(r, gg, b), mn = Math.min(r, gg, b), L = (r + gg + b) / 765, cloth = mx < 62 || (mx - mn) / mx < 0.2;
     if (!cloth) continue;                                    // skin
-    if (skirt && L < 0.5) { const t = Math.min(1, L * 2.4); d[i] = 86 + 44 * t; d[i + 1] = 28 + 30 * t; d[i + 2] = 172 + 62 * t; }            // the dark of the skirt: deep violet, its folds kept
-    else if (skirt && !bodice) { d[i] = 196 * L + 30; d[i + 1] = 160 * L + 20; d[i + 2] = 255; }                                               // its pale stripes: lilac
-    else if (bodice && L > 0.42) { const t = 0.5 + 0.5 * L; d[i] = 118 * t; d[i + 1] = 52 * t; d[i + 2] = 236 * t; }                            // the white blouse: the dragon's purple
+    let done = true;
+    if (skirt && L < 0.5) { const t = Math.min(1, L * 2.4); d[i] = 132 + 40 * t; d[i + 1] = 78 + 34 * t; d[i + 2] = 224 + 24 * t; }          // the dark of the skirt: a soft violet, its folds kept
+    else if (skirt && !bodice) { d[i] = 150 + 70 * L; d[i + 1] = 110 + 80 * L; d[i + 2] = 255; }                                          // its pale stripes: lilac
+    else if (bodice && L > 0.42) { const t = 0.55 + 0.45 * L; d[i] = 156 * t; d[i + 1] = 100 * t; d[i + 2] = 246 * t; }                    // the white blouse: a lighter purple
+    else done = false;
+    if (done) {                                              // squiggles all over it, in a paler thread
+      const x = ((i / 4) % W) / UPS, y = Math.floor(i / 4 / W) / UPS, wave = Math.sin((y + 6.5 * Math.sin(x * 0.12) + 2 * Math.sin(x * 0.29 + 1.3)) * 0.2);
+      const k = Math.min(1, Math.max(0, (wave - 0.86) / 0.08)); if (k > 0) { d[i] += (240 - d[i]) * k * 0.9; d[i + 1] += (226 - d[i + 1]) * k * 0.9; d[i + 2] += (255 - d[i + 2]) * k * 0.9; }
+    }
   }
   g.putImageData(px, 0, 0);
   const tex = new THREE.CanvasTexture(cv); tex.flipY = map.flipY; tex.colorSpace = map.colorSpace; tex.wrapS = map.wrapS; tex.wrapT = map.wrapT; tex.anisotropy = map.anisotropy;
